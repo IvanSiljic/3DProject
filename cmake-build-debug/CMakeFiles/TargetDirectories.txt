@@ -1,0 +1,3 @@
+/home/isiljic/Desktop/3DProject/cmake-build-debug/CMakeFiles/3DProject.dir
+/home/isiljic/Desktop/3DProject/cmake-build-debug/CMakeFiles/edit_cache.dir
+/home/isiljic/Desktop/3DProject/cmake-build-debug/CMakeFiles/rebuild_cache.dir

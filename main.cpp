@@ -10,12 +10,13 @@
 #include "imgui/backends/imgui_impl_opengl3.h"
 #include "glm/glm.hpp"
 
-const unsigned int SCREEN_WIDTH = 1024;
+unsigned int SCREEN_WIDTH = 1024;
+unsigned int SCREEN_HEIGHT = 1024;
 
-const unsigned int SCREEN_HEIGHT = 1024;
+unsigned int iFrame = 0;
+
 const unsigned short OPENGL_MAJOR_VERSION = 4;
-
-const unsigned short OPENGL_MINOR_VERSION = 6;
+const unsigned short OPENGL_MINOR_VERSION = 3;
 GLuint screenTex;
 
 bool vSync = true;
@@ -58,6 +59,8 @@ GLuint indices[] =
 void framebuffer_size_callback(GLFWwindow* window, int width, int height) {
     // Update viewport when window is resized
     glViewport(0, 0, width, height);
+    SCREEN_WIDTH = width;
+    SCREEN_HEIGHT = height;
 
     // Recreate screen texture with new dimensions
     glDeleteTextures(1, &screenTex);
@@ -244,8 +247,16 @@ int main()
         return -1;
     }
 
+    GLint frameLocation = glGetUniformLocation(computeProgram, "iFrame");
+    if (frameLocation == -1) {
+        std::cerr << "Failed to locate uniform variable: iResolution" << std::endl;
+        return -1;
+    }
+
     while (!glfwWindowShouldClose(window))
     {
+        iFrame++;
+
         glfwPollEvents();
 
         ImGui_ImplOpenGL3_NewFrame();
@@ -264,7 +275,8 @@ int main()
         glClear(GL_COLOR_BUFFER_BIT);
 
         glUseProgram(computeProgram);
-        glUniform2f(resolutionLocation, SCREEN_WIDTH, SCREEN_HEIGHT); // Updated here
+        glUniform2f(resolutionLocation, static_cast<GLfloat>(SCREEN_WIDTH), static_cast<GLfloat>(SCREEN_HEIGHT));
+        glUniform1ui(frameLocation, iFrame);
         glDispatchCompute((int)(SCREEN_WIDTH / 8), (int)(SCREEN_HEIGHT / 4), 1);
         glMemoryBarrier(GL_ALL_BARRIER_BITS);
 

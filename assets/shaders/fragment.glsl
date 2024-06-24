@@ -1,4 +1,4 @@
-#version 460 core
+#version 430 core
 out vec4 FragColor;
 uniform sampler2D screen;
 in vec2 UVs;

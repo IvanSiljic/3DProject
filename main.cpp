@@ -13,13 +13,18 @@
 unsigned int SCREEN_WIDTH = 1024;
 unsigned int SCREEN_HEIGHT = 1024;
 
-unsigned int iFrame = 0;
+float c_FOVDegrees = 90.f;
+unsigned c_numBounces = 3;
+float c_focalLength = 1.f;
+GLuint frameCounter = 0;
+GLuint samplesPerPixel = 5;
 
 const unsigned short OPENGL_MAJOR_VERSION = 4;
 const unsigned short OPENGL_MINOR_VERSION = 3;
 GLuint screenTex;
+GLuint accumulationTex;
 
-bool vSync = true;
+bool settingsChanged = false;
 
 #define MAX_SPHERES 2 // Make sure to change in assets/shaders/compute.glsl
 #define SPHERE_DATA_POINTS 7
@@ -61,8 +66,9 @@ void framebuffer_size_callback(GLFWwindow* window, int width, int height) {
     glViewport(0, 0, width, height);
     SCREEN_WIDTH = width;
     SCREEN_HEIGHT = height;
+    frameCounter = 0;
 
-    // Recreate screen texture with new dimensions
+    // Recreate screen and accumulation textures with new dimensions
     glDeleteTextures(1, &screenTex);
     glCreateTextures(GL_TEXTURE_2D, 1, &screenTex);
     glTextureParameteri(screenTex, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
@@ -71,6 +77,15 @@ void framebuffer_size_callback(GLFWwindow* window, int width, int height) {
     glTextureParameteri(screenTex, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glTextureStorage2D(screenTex, 1, GL_RGBA32F, width, height);
     glBindImageTexture(0, screenTex, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
+
+    glDeleteTextures(1, &accumulationTex);
+    glCreateTextures(GL_TEXTURE_2D, 1, &accumulationTex);
+    glTextureParameteri(accumulationTex, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTextureParameteri(accumulationTex, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTextureParameteri(accumulationTex, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTextureParameteri(accumulationTex, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTextureStorage2D(accumulationTex, 1, GL_RGBA32F, width, height);
+    glBindImageTexture(1, accumulationTex, 0, GL_FALSE, 0, GL_READ_WRITE, GL_RGBA32F);
 }
 
 int main()
@@ -89,7 +104,6 @@ int main()
         return -1;
     }
     glfwMakeContextCurrent(window);
-    glfwSwapInterval(vSync);
 
     // Set the framebuffer size callback
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
@@ -142,6 +156,14 @@ int main()
     glTextureParameteri(screenTex, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glTextureStorage2D(screenTex, 1, GL_RGBA32F, SCREEN_WIDTH, SCREEN_HEIGHT);
     glBindImageTexture(0, screenTex, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
+
+    glCreateTextures(GL_TEXTURE_2D, 1, &accumulationTex);
+    glTextureParameteri(accumulationTex, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTextureParameteri(accumulationTex, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTextureParameteri(accumulationTex, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTextureParameteri(accumulationTex, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTextureStorage2D(accumulationTex, 1, GL_RGBA32F, SCREEN_WIDTH, SCREEN_HEIGHT);
+    glBindImageTexture(1, accumulationTex, 0, GL_FALSE, 0, GL_READ_WRITE, GL_RGBA32F);
 
     std::string vertexCode;
     std::string fragmentCode;
@@ -216,47 +238,16 @@ int main()
     glAttachShader(computeProgram, computeShader);
     glLinkProgram(computeProgram);
 
-    int work_grp_cnt[3];
-    glGetIntegeri_v(GL_MAX_COMPUTE_WORK_GROUP_COUNT, 0, &work_grp_cnt[0]);
-    glGetIntegeri_v(GL_MAX_COMPUTE_WORK_GROUP_COUNT, 1, &work_grp_cnt[1]);
-    glGetIntegeri_v(GL_MAX_COMPUTE_WORK_GROUP_COUNT, 2, &work_grp_cnt[2]);
-    std::cout << "Max work groups per compute shader"
-              << " x:" << work_grp_cnt[0]
-              << " y:" << work_grp_cnt[1]
-              << " z:" << work_grp_cnt[2] << "\n";
-
-    int work_grp_size[3];
-    glGetIntegeri_v(GL_MAX_COMPUTE_WORK_GROUP_SIZE, 0, &work_grp_size[0]);
-    glGetIntegeri_v(GL_MAX_COMPUTE_WORK_GROUP_SIZE, 1, &work_grp_size[1]);
-    glGetIntegeri_v(GL_MAX_COMPUTE_WORK_GROUP_SIZE, 2, &work_grp_size[2]);
-    std::cout << "Max work group sizes"
-              << " x:" << work_grp_size[0]
-              << " y:" << work_grp_size[1]
-              << " z:" << work_grp_size[2] << "\n";
-
-    int work_grp_inv;
-    glGetIntegerv(GL_MAX_COMPUTE_WORK_GROUP_INVOCATIONS, &work_grp_inv);
-    std::cout << "Max invocations count per work group: " << work_grp_inv << "\n";
-
-    glLinkProgram(computeProgram);
-
-// Set iResolution uniform variable
+    // Set uniform variable locations
     GLint resolutionLocation = glGetUniformLocation(computeProgram, "iResolution");
-    if (resolutionLocation == -1) {
-        std::cerr << "Failed to locate uniform variable: iResolution" << std::endl;
-        return -1;
-    }
-
-    GLint frameLocation = glGetUniformLocation(computeProgram, "iFrame");
-    if (frameLocation == -1) {
-        std::cerr << "Failed to locate uniform variable: iResolution" << std::endl;
-        return -1;
-    }
+    GLint FOVLocation = glGetUniformLocation(computeProgram, "c_FOVDegrees");
+    GLint focalLengthLocation = glGetUniformLocation(computeProgram, "c_focalLength");
+    GLint numBouncesLocation = glGetUniformLocation(computeProgram, "c_numBounces");
+    GLint samplesPerPixelLocation = glGetUniformLocation(computeProgram, "samplesPerPixel");
+    GLint frameCounterLocation = glGetUniformLocation(computeProgram, "frameCounter");
 
     while (!glfwWindowShouldClose(window))
     {
-        iFrame++;
-
         glfwPollEvents();
 
         ImGui_ImplOpenGL3_NewFrame();
@@ -265,7 +256,24 @@ int main()
 
         // Create a window using ImGui
         ImGui::Begin("Settings");
+
         // Add ImGui controls here
+        static float prevFOV = c_FOVDegrees;
+        static float prevFocalLength = c_focalLength;
+        static unsigned prevNumBounces = c_numBounces;
+        static unsigned prevSamplesPerPixel = samplesPerPixel;
+
+        ImGui::SliderFloat("Field of View", &c_FOVDegrees, 1.0f, 180.0f);
+        ImGui::SliderFloat("Focal Length", &c_focalLength, 0.1f, 10.0f);
+        ImGui::SliderInt("Number of Bounces", (int*)&c_numBounces, 1, 10);
+        ImGui::SliderInt("Samples per Pixel", (int*)&samplesPerPixel, 1, 20);
+
+        if (c_FOVDegrees != prevFOV || c_numBounces != prevNumBounces || prevFocalLength != c_focalLength || prevSamplesPerPixel != samplesPerPixel) {
+            settingsChanged = true;
+            prevFOV = c_FOVDegrees;
+            prevNumBounces = c_numBounces;
+        }
+
         ImGui::End();
 
         ImGui::Render();
@@ -275,10 +283,25 @@ int main()
         glClear(GL_COLOR_BUFFER_BIT);
 
         glUseProgram(computeProgram);
-        glUniform2f(resolutionLocation, static_cast<GLfloat>(SCREEN_WIDTH), static_cast<GLfloat>(SCREEN_HEIGHT));
-        glUniform1ui(frameLocation, iFrame);
+        glUniform2i(resolutionLocation, SCREEN_WIDTH, SCREEN_HEIGHT);
+        glUniform1f(FOVLocation, static_cast<GLfloat>(c_FOVDegrees));
+        glUniform1f(focalLengthLocation, static_cast<GLfloat>(c_focalLength));
+        glUniform1ui(samplesPerPixelLocation, samplesPerPixel);
+        glUniform1ui(numBouncesLocation, c_numBounces);
+
+        if (settingsChanged) {
+            frameCounter = 0;
+            settingsChanged = false;
+            // Clear the accumulation buffer
+            glClearTexImage(accumulationTex, 0, GL_RGBA, GL_FLOAT, nullptr);
+        }
+
+        glUniform1ui(frameCounterLocation, frameCounter);
+
         glDispatchCompute((int)(SCREEN_WIDTH / 8), (int)(SCREEN_HEIGHT / 4), 1);
         glMemoryBarrier(GL_ALL_BARRIER_BITS);
+
+        frameCounter++;
 
         glUseProgram(screenShaderProgram);
         glBindTextureUnit(0, screenTex);

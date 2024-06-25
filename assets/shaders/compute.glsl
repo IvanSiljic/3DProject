@@ -1,46 +1,28 @@
 #version 430 core
 layout(local_size_x = 8, local_size_y = 4, local_size_z = 1) in;
 layout(rgba32f, binding = 0) uniform image2D screen;
-uniform vec2 iResolution;
-uniform uint iFrame;
+layout(rgba32f, binding = 1) uniform image2D imgAccumulation;
+uniform ivec2 iResolution;
+uniform float c_FOVDegrees;
+uniform uint c_numBounces;
+uniform float c_focalLength;
+uniform uint frameCounter;
+uniform uint samplesPerPixel;
 
-// Accumulation buffer
-layout(rgba32f, binding = 1) uniform image2D accumulationBuffer;
+// The minimum distance a ray must travel before we consider an intersection.
+const float c_minimumRayHitTime = -0.1f;
 
-// The minimunm distance a ray must travel before we consider an intersection.
-// This is to prevent a ray from intersecting a surface it just bounced off of.
-const float c_minimumRayHitTime = 0.1f;
+// The farthest we look for ray hits
+const float c_superFar = -100000.0f;
 
-// the farthest we look for ray hits
-const float c_superFar = 10000.0f;
-
-// camera FOV
-const float c_FOVDegrees = 90.0f;
-
-// pi
+// Pi
 const float c_pi = 3.141592;
 const float c_twopi = 6.283185;
 
-// Define the maximum number of bounces
-const int c_numBounces = 3;
-const float c_rayPosNormalNudge = 0.001f;  // Define the value for ray position normal nudge
+// Define the value for ray position normal nudge
+const float c_rayPosNormalNudge = 0.001f;
 
-
-struct SRayHitInfo
-{
-    float dist;
-    vec3 normal;
-    vec3 albedo;    // Add albedo field
-    vec3 emissive;  // Add emissive field
-};
-
-float ScalarTriple(vec3 u, vec3 v, vec3 w)
-{
-    return dot(cross(u, v), w);
-}
-
-uint wang_hash(inout uint seed)
-{
+uint wang_hash(inout uint seed) {
     seed = uint(seed ^ uint(61)) ^ uint(seed >> uint(16));
     seed *= uint(9);
     seed = seed ^ (seed >> 4);
@@ -49,13 +31,11 @@ uint wang_hash(inout uint seed)
     return seed;
 }
 
-float RandomFloat01(inout uint state)
-{
+float RandomFloat01(inout uint state) {
     return float(wang_hash(state)) / 4294967296.0;
 }
 
-vec3 RandomUnitVector(inout uint state)
-{
+vec3 RandomUnitVector(inout uint state) {
     float z = RandomFloat01(state) * 2.0f - 1.0f;
     float a = RandomFloat01(state) * c_twopi;
     float r = sqrt(1.0f - z * z);
@@ -64,116 +44,122 @@ vec3 RandomUnitVector(inout uint state)
     return vec3(x, y, z);
 }
 
-bool TestSphereTrace(in vec3 rayPos, in vec3 rayDir, inout SRayHitInfo info, in vec4 sphere) {
-    vec3 center = sphere.xyz;
-    float radius = sphere.w;
+struct Ray {
+    vec3 origin;
+    vec3 direction;
+};
 
-    vec3 oc = rayPos - center;
-
-    float a = dot(rayDir, rayDir);
-    float b = 2.0 * dot(oc, rayDir);
-    float c = dot(oc, oc) - radius * radius;
-
-    float discriminant = b * b - 4.0 * a * c;
-
-    if (discriminant > 0.0) {
-        float t1 = (-b - sqrt(discriminant)) / (2.0 * a);
-        float t2 = (-b + sqrt(discriminant)) / (2.0 * a);
-
-        if (t1 > c_minimumRayHitTime && t1 < info.dist) {
-            info.dist = t1;
-            info.normal = normalize(rayPos + t1 * rayDir - center);
-            return true;
-        } else if (t2 > c_minimumRayHitTime && t2 < info.dist) {
-            info.dist = t2;
-            info.normal = normalize(rayPos + t2 * rayDir - center);
-            return true;
-        }
-    }
-
-    return false;
+// Function to get the point at a distance t along the Ray
+vec3 getRayPointAt(Ray r, float t) {
+    return r.origin + t * r.direction;
 }
 
-bool TestTriangleTrace(in vec3 rayPos, in vec3 rayDir, inout SRayHitInfo info, in vec3 v0, in vec3 v1, in vec3 v2) {
-    vec3 edge1 = v1 - v0;
-    vec3 edge2 = v2 - v0;
-    vec3 h = cross(rayDir, edge2);
-    float a = dot(edge1, h);
-    if (a > -0.00001 && a < 0.00001)
-    return false;
-    float f = 1.0 / a;
-    vec3 s = rayPos - v0;
-    float u = f * dot(s, h);
-    if (u < 0.0 || u > 1.0)
-    return false;
-    vec3 q = cross(s, edge1);
-    float v = f * dot(rayDir, q);
-    if (v < 0.0 || u + v > 1.0)
-    return false;
-    float t = f * dot(edge2, q);
-    if (t > c_minimumRayHitTime && t < info.dist) {
-        info.dist = t;
-        info.normal = normalize(cross(edge1, edge2));
-        return true;
-    } else {
+struct HitRecord {
+    vec3 p;
+    vec3 normal;
+    float t;
+    bool frontFace;
+    vec3 color;
+};
+
+void setFaceNormal(in Ray r, in vec3 outwardNormal, inout HitRecord rec) {
+    // Sets the hit record normal vector.
+    // NOTE: the parameter `outward_normal` is assumed to have unit length.
+
+    rec.frontFace = dot(r.direction, outwardNormal) < 0;
+    rec.normal = rec.frontFace ? outwardNormal : -outwardNormal;
+}
+
+struct Sphere {
+    vec3 center;
+    float radius;
+    vec3 color;
+};
+
+struct Interval {
+    float min;
+    float max;
+};
+
+float getIntervalSize(in Interval interval) {
+    return interval.max - interval.min;
+}
+
+bool intervalContains (in Interval interval, in float x) {
+    return interval.min <= x || interval.max >= x;
+}
+
+bool intervalSurrounds (in Interval interval, in float x) {
+    return interval.min < x || interval.max > x;
+}
+
+float ScalarTriple(vec3 u, vec3 v, vec3 w) {
+    return dot(cross(u, v), w);
+}
+
+bool hitSphere(in Ray ray, in Interval interval, inout HitRecord rec, in Sphere sphere) {
+    vec3 oc = sphere.center - ray.origin;
+
+    float a = dot(ray.direction, ray.direction);
+    float h = dot(ray.direction, oc);
+    float c = dot(oc, oc) - sphere.radius * sphere.radius;
+
+    float discriminant = h * h - a * c;
+
+    if (discriminant < 0) {
         return false;
     }
+
+    float sqrtd = sqrt(discriminant);
+
+    float root = (h - sqrtd) / a;
+    if (!intervalSurrounds(interval, root)) {
+        root = (h + sqrtd) / a;
+        if (!intervalSurrounds(interval, root))
+        return false;
+    }
+
+    rec.t = root;
+    rec.p = getRayPointAt(ray, rec.t);
+    vec3 outwardNormal = (rec.p - sphere.center) / sphere.radius;
+    setFaceNormal(ray, outwardNormal, rec);
+
+    return true;
 }
 
-bool TestQuadTrace(in vec3 rayPos, in vec3 rayDir, inout SRayHitInfo info, in vec3 a, in vec3 b, in vec3 c, in vec3 d) {
-    bool hit = false;
-    if (TestTriangleTrace(rayPos, rayDir, info, a, b, c)) {
-        hit = true;
-    }
-    if (TestTriangleTrace(rayPos, rayDir, info, a, c, d)) {
-        hit = true;
-    }
-    return hit;
-}
-
-void TestSceneTrace(in vec3 rayPos, in vec3 rayDir, inout SRayHitInfo hitInfo)
-{
-    {
-        vec3 A = vec3(-15.0f, -15.0f, 22.0f);
-        vec3 B = vec3( 15.0f, -15.0f, 22.0f);
-        vec3 C = vec3( 15.0f,  15.0f, 22.0f);
-        vec3 D = vec3(-15.0f,  15.0f, 22.0f);
-        if (TestQuadTrace(rayPos, rayDir, hitInfo, A, B, C, D))
-        {
-            hitInfo.albedo = vec3(0.7f, 0.7f, 0.7f);
-            hitInfo.emissive = vec3(0.0f, 0.0f, 0.0f);
+void TestSceneTrace(in Ray ray, inout HitRecord hitRecord) {
+    Sphere s = Sphere(vec3(0, 0, -1), 0.5f, vec3(1.0f, 1.0f, 1.0f));
+    Interval interval = Interval(c_minimumRayHitTime, c_superFar);
+    if (hitSphere(ray, interval, hitRecord, s)) {
+        if (intervalContains(interval, hitRecord.t)) {
+            interval.max = hitRecord.t;
+            hitRecord.color = s.color;
         }
     }
 
-    if (TestSphereTrace(rayPos, rayDir, hitInfo, vec4(-10.0f, 0.0f, 20.0f, 1.0f)))
-    {
-        hitInfo.albedo = vec3(1.0f, 0.1f, 0.1f);
-        hitInfo.emissive = vec3(0.0f, 0.0f, 0.0f);
-    }
-
-    if (TestSphereTrace(rayPos, rayDir, hitInfo, vec4(0.0f, 0.0f, 20.0f, 1.0f)))
-    {
-        hitInfo.albedo = vec3(0.1f, 1.0f, 0.1f);
-        hitInfo.emissive = vec3(0.0f, 0.0f, 0.0f);
-    }
-
-    if (TestSphereTrace(rayPos, rayDir, hitInfo, vec4(10.0f, 0.0f, 20.0f, 1.0f)))
-    {
-        hitInfo.albedo = vec3(0.1f, 0.1f, 1.0f);
-        hitInfo.emissive = vec3(0.0f, 0.0f, 0.0f);
-    }
-
-
-    if (TestSphereTrace(rayPos, rayDir, hitInfo, vec4(10.0f, 10.0f, 20.0f, 5.0f)))
-    {
-        hitInfo.albedo = vec3(0.0f, 0.0f, 0.0f);
-        hitInfo.emissive = vec3(1.0f, 0.9f, 0.7f) * 100.0f;
+    s = Sphere(vec3(0,-100.5,-1), 100.0f, vec3(1.0f, 1.0f, 1.0f));
+    if (hitSphere(ray, interval, hitRecord, s)) {
+        if (intervalContains(interval, hitRecord.t)) {
+            interval.max = hitRecord.t;
+            hitRecord.color = s.color;
+        }
     }
 }
 
-vec3 GetColorForRay(in vec3 startRayPos, in vec3 startRayDir, inout uint rngState)
-{
-    // initialize
+vec3 GetColorForRay(in Ray ray, inout uint rngState) {
+    HitRecord hitRecord;
+    hitRecord.color = vec3(0.0f);
+
+    TestSceneTrace(ray, hitRecord);
+
+    return hitRecord.color;
+
+    vec3 unitDirection = normalize(ray.direction);
+    float a = 0.5*(unitDirection.y + 1.0);
+    return (1 - a) * vec3(1.0, 1.0, 1.0) + a * vec3(0.5, 0.7, 1.0);
+
+
+    /* initialize
     vec3 ret = vec3(0.0f, 0.0f, 0.0f);
     vec3 throughput = vec3(1.0f, 1.0f, 1.0f);
     vec3 rayPos = startRayPos;
@@ -204,43 +190,59 @@ vec3 GetColorForRay(in vec3 startRayPos, in vec3 startRayDir, inout uint rngStat
     }
 
     // return pixel color
-    return ret;
+    return ret; */
 }
 
 void main() {
     ivec2 fragCoord = ivec2(gl_GlobalInvocationID.xy);
 
     // initialize a random number state based on frag coord and frame
-    uint rngState = uint(uint(fragCoord.x) * uint(1973) + uint(fragCoord.y) * uint(9277) + uint(iResolution) * uint(26699)) | uint(1);
+    uint rngState = uint(uint(fragCoord.x) * uint(1973) + uint(fragCoord.y) * uint(9277) + uint(frameCounter) * uint(26699)) | uint(1);
 
     // Calculate normalized coordinates
-    vec2 uv = abs((vec2(fragCoord) / iResolution) * 2.0f - 1.0f);
+    vec2 uv = (vec2(fragCoord) / iResolution) * 2.0f - 1.0f;
 
-    // The ray starts at the camera position (the origin)
-    vec3 rayPosition = vec3(0.0f, 0.0f, 0.0f);
+    // Ray starts at the camera position (the origin)
+    Ray ray;
+    ray.origin = vec3(0.0f, 0.0f, 0.0f);
 
-    // calculate the camera distance
+    // Calculate camera distance
     float cameraDistance = 1.0f / tan(c_FOVDegrees * 0.5f * c_pi / 180.0f);
 
-    // calculate coordinates of the ray target on the imaginary pixel plane.
-    // -1 to +1 on x,y axis. 1 unit away on the z axis
-    vec3 rayTarget = vec3((fragCoord/iResolution.xy) * 2.0f - 1.0f, cameraDistance);
+    // camera stuff
+    float aspectRatio = float(iResolution.x) / float(iResolution.y);
+    float viewportHeight = 2.0;
+    float viewportWidth = aspectRatio * viewportHeight;
 
-    // correct for aspect ratio
-    float aspectRatio = iResolution.x / iResolution.y;
-    rayTarget.y /= aspectRatio;
+    vec3 viewportU = vec3(viewportWidth, 0.0, 0.0);
+    vec3 viewportV = vec3(0.0, -viewportHeight, 0.0);
 
-    // calculate a normalized vector for the ray direction.
-    // it's pointing from the ray position to the ray target.
-    vec3 rayDir = normalize(rayTarget - rayPosition);
+    vec3 pixelDeltaU = viewportU / float(iResolution.x);
+    vec3 pixelDeltaV = viewportV / float(iResolution.y);
 
-    // Get pixel color
-    vec3 color = GetColorForRay(rayPosition, rayDir, rngState);
+    vec3 viewportUpperLeft = ray.origin - vec3(0.0, 0.0, c_focalLength) - viewportU * 0.5 - viewportV * 0.5;
+    vec3 pixel00Loc = viewportUpperLeft + 0.5 * (pixelDeltaU + pixelDeltaV);
 
-    // average the frames together
-    vec3 lastFrameColor = texture(accumulationBuffer, fragCoord / iResolution.xy).rgb;
-    color = mix(lastFrameColor, color, 1.0f / float(iFrame+1));
+    // Calculate the pixel location
+    vec3 pixelCenter = pixel00Loc + fragCoord.x * pixelDeltaU + fragCoord.y * pixelDeltaV;
+    ray.direction = normalize(pixelCenter - ray.origin);
+
+    // Accumulated color from previous frames
+    vec4 accumulatedColor = imageLoad(imgAccumulation, fragCoord);
+    vec4 newColor = vec4(0.0);
+
+    // Get color for current ray
+    newColor = vec4(GetColorForRay(ray, rngState), 1.0f);
+
+    // Mix the old accumulated color with the new color
+    float alpha = 1.0 / float(frameCounter + 1);
+    vec4 color = mix(accumulatedColor, newColor, alpha);
+
+    // Store the color in the accumulation buffer
+    imageStore(imgAccumulation, fragCoord, color);
+
+    fragCoord.y = iResolution.y - fragCoord.y;
 
     // Store the color in the image
-    imageStore(screen, fragCoord, vec4(color, 1.0f));
+    imageStore(screen, fragCoord, color);
 }

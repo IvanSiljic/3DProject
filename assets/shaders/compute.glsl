@@ -10,10 +10,10 @@ uniform uint frameCounter;
 uniform uint samplesPerPixel;
 
 // The minimum distance a ray must travel before we consider an intersection.
-const float c_minimumRayHitTime = -0.1f;
+const float c_minimumRayHitTime = 0.1f;
 
 // The farthest we look for ray hits
-const float c_superFar = -100000.0f;
+const float c_superFar = 100000.0f;
 
 // Pi
 const float c_pi = 3.141592;
@@ -64,8 +64,6 @@ struct HitRecord {
 
 void setFaceNormal(in Ray r, in vec3 outwardNormal, inout HitRecord rec) {
     // Sets the hit record normal vector.
-    // NOTE: the parameter `outward_normal` is assumed to have unit length.
-
     rec.frontFace = dot(r.direction, outwardNormal) < 0;
     rec.normal = rec.frontFace ? outwardNormal : -outwardNormal;
 }
@@ -98,65 +96,49 @@ float ScalarTriple(vec3 u, vec3 v, vec3 w) {
 }
 
 bool hitSphere(in Ray ray, in Interval interval, inout HitRecord rec, in Sphere sphere) {
-    vec3 oc = sphere.center - ray.origin;
-
+    vec3 oc = ray.origin - sphere.center;
     float a = dot(ray.direction, ray.direction);
-    float h = dot(ray.direction, oc);
+    float b = dot(oc, ray.direction);
     float c = dot(oc, oc) - sphere.radius * sphere.radius;
+    float discriminant = b * b - a * c;
 
-    float discriminant = h * h - a * c;
-
-    if (discriminant < 0) {
-        return false;
+    if (discriminant > 0) {
+        float sqrtd = sqrt(discriminant);
+        float root = (-b - sqrtd) / a;
+        if (intervalSurrounds(interval, root)) {
+            rec.t = root;
+            rec.p = getRayPointAt(ray, rec.t);
+            vec3 outwardNormal = (rec.p - sphere.center) / sphere.radius;
+            setFaceNormal(ray, outwardNormal, rec);
+            rec.color = sphere.color;
+            return true;
+        }
+        root = (-b + sqrtd) / a;
+        if (intervalSurrounds(interval, root)) {
+            rec.t = root;
+            rec.p = getRayPointAt(ray, rec.t);
+            vec3 outwardNormal = (rec.p - sphere.center) / sphere.radius;
+            setFaceNormal(ray, outwardNormal, rec);
+            rec.color = sphere.color;
+            return true;
+        }
     }
-
-    float sqrtd = sqrt(discriminant);
-
-    float root = (h - sqrtd) / a;
-    if (!intervalSurrounds(interval, root)) {
-        root = (h + sqrtd) / a;
-        if (!intervalSurrounds(interval, root))
-        return false;
-    }
-
-    rec.t = root;
-    rec.p = getRayPointAt(ray, rec.t);
-    vec3 outwardNormal = (rec.p - sphere.center) / sphere.radius;
-    setFaceNormal(ray, outwardNormal, rec);
-
-    return true;
+    return false;
 }
 
 void TestSceneTrace(in Ray ray, inout HitRecord hitRecord) {
-    Sphere s = Sphere(vec3(0, 0, -1), 0.5f, vec3(1.0f, 1.0f, 1.0f));
-    Interval interval = Interval(c_minimumRayHitTime, c_superFar);
-    if (hitSphere(ray, interval, hitRecord, s)) {
-        if (intervalContains(interval, hitRecord.t)) {
-            interval.max = hitRecord.t;
-            hitRecord.color = s.color;
-        }
-    }
 
-    s = Sphere(vec3(0,-100.5,-1), 100.0f, vec3(1.0f, 1.0f, 1.0f));
-    if (hitSphere(ray, interval, hitRecord, s)) {
-        if (intervalContains(interval, hitRecord.t)) {
-            interval.max = hitRecord.t;
-            hitRecord.color = s.color;
-        }
-    }
 }
 
 vec3 GetColorForRay(in Ray ray, inout uint rngState) {
     HitRecord hitRecord;
-    hitRecord.color = vec3(0.0f);
-
-    TestSceneTrace(ray, hitRecord);
-
-    return hitRecord.color;
+    if (hitSphere(ray, Interval(c_minimumRayHitTime, c_superFar), hitRecord, Sphere(vec3(0,0,-1), 0.5f, vec3(1.0f)))) {
+        return 0.5f * (hitRecord.normal + 1);
+    }
 
     vec3 unitDirection = normalize(ray.direction);
-    float a = 0.5*(unitDirection.y + 1.0);
-    return (1 - a) * vec3(1.0, 1.0, 1.0) + a * vec3(0.5, 0.7, 1.0);
+    float t = 0.5 * (unitDirection.y + 1.0);
+    return (1.0 - t) * vec3(1.0, 1.0, 1.0) + t * vec3(0.5, 0.7, 1.0);
 
 
     /* initialize

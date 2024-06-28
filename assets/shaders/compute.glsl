@@ -8,19 +8,20 @@ uniform uint c_numBounces;
 uniform float c_focalLength;
 uniform uint frameCounter;
 uniform uint samplesPerPixel;
+uniform uint numOfSpheres;
 
 // The minimum distance a ray must travel before we consider an intersection.
 const float c_minimumRayHitTime = 0.1f;
 
 // The farthest we look for ray hits
-const float c_superFar = 100000.0f;
+const float c_superFar = 10000.0f;
+
+// Define the value for ray position normal nudge
+const float c_rayPosNormalNudge = 0.001f;
 
 // Pi
 const float c_pi = 3.141592;
 const float c_twopi = 6.283185;
-
-// Define the value for ray position normal nudge
-const float c_rayPosNormalNudge = 0.001f;
 
 uint wang_hash(inout uint seed) {
     seed = uint(seed ^ uint(61)) ^ uint(seed >> uint(16));
@@ -31,17 +32,34 @@ uint wang_hash(inout uint seed) {
     return seed;
 }
 
-float RandomFloat01(inout uint state) {
+float RandomFloat(inout uint state) {
     return float(wang_hash(state)) / 4294967296.0;
 }
 
-vec3 RandomUnitVector(inout uint state) {
-    float z = RandomFloat01(state) * 2.0f - 1.0f;
-    float a = RandomFloat01(state) * c_twopi;
-    float r = sqrt(1.0f - z * z);
-    float x = r * cos(a);
-    float y = r * sin(a);
-    return vec3(x, y, z);
+vec3 randomInUnitSphere(inout uint state) {
+    while (true) {
+        vec3 p = vec3(
+        RandomFloat(state) * 2.0 - 1.0,
+        RandomFloat(state) * 2.0 - 1.0,
+        RandomFloat(state) * 2.0 - 1.0
+        );
+        if (dot(p, p) < 1.0) {
+            return p;
+        }
+    }
+}
+
+vec3 randomUnitVector(inout uint state) {
+    return normalize(randomInUnitSphere(state));
+}
+
+vec3 randomOnHemisphere(vec3 normal, inout uint state) {
+    vec3 onUnitSphere = randomUnitVector(state);
+    if (dot(onUnitSphere, normal) > 0.0) {
+        return onUnitSphere;
+    } else {
+        return -onUnitSphere;
+    }
 }
 
 struct Ray {
@@ -74,6 +92,10 @@ struct Sphere {
     vec3 color;
 };
 
+layout(std430, binding = 0) buffer Spheres {
+    Sphere spheres[];
+};
+
 struct Interval {
     float min;
     float max;
@@ -83,28 +105,28 @@ float getIntervalSize(in Interval interval) {
     return interval.max - interval.min;
 }
 
-bool intervalContains (in Interval interval, in float x) {
-    return interval.min <= x || interval.max >= x;
+bool intervalContains(in Interval interval, in float x) {
+    return interval.min <= x && x <= interval.max;
 }
 
-bool intervalSurrounds (in Interval interval, in float x) {
-    return interval.min < x || interval.max > x;
+bool intervalSurrounds(in Interval interval, in float x) {
+    return interval.min < x && interval.max > x;
 }
 
 float ScalarTriple(vec3 u, vec3 v, vec3 w) {
     return dot(cross(u, v), w);
 }
 
-bool hitSphere(in Ray ray, in Interval interval, inout HitRecord rec, in Sphere sphere) {
-    vec3 oc = ray.origin - sphere.center;
+bool hitSphere(in Ray ray, inout Interval interval, inout HitRecord rec, in Sphere sphere) {
+    vec3 oc = sphere.center - ray.origin;
     float a = dot(ray.direction, ray.direction);
-    float b = dot(oc, ray.direction);
+    float h = dot(ray.direction, oc);
     float c = dot(oc, oc) - sphere.radius * sphere.radius;
-    float discriminant = b * b - a * c;
+    float discriminant = h * h - a * c;
 
     if (discriminant > 0) {
         float sqrtd = sqrt(discriminant);
-        float root = (-b - sqrtd) / a;
+        float root = (h - sqrtd) / a;
         if (intervalSurrounds(interval, root)) {
             rec.t = root;
             rec.p = getRayPointAt(ray, rec.t);
@@ -113,7 +135,7 @@ bool hitSphere(in Ray ray, in Interval interval, inout HitRecord rec, in Sphere 
             rec.color = sphere.color;
             return true;
         }
-        root = (-b + sqrtd) / a;
+        root = (h + sqrtd) / a;
         if (intervalSurrounds(interval, root)) {
             rec.t = root;
             rec.p = getRayPointAt(ray, rec.t);
@@ -126,53 +148,50 @@ bool hitSphere(in Ray ray, in Interval interval, inout HitRecord rec, in Sphere 
     return false;
 }
 
-void TestSceneTrace(in Ray ray, inout HitRecord hitRecord) {
+bool TestSceneTrace(in Ray ray, inout HitRecord hitRecord) {
+    bool hitAnything = false;
+    Interval interval = Interval(c_minimumRayHitTime, c_superFar);
 
+    for (uint i = 0; i < numOfSpheres; ++i) {
+        if (hitSphere(ray, interval, hitRecord, spheres[i])) {
+            hitAnything = true;
+            interval.max = hitRecord.t;
+        }
+    }
+
+    return hitAnything;
 }
 
 vec3 GetColorForRay(in Ray ray, inout uint rngState) {
-    HitRecord hitRecord;
-    if (hitSphere(ray, Interval(c_minimumRayHitTime, c_superFar), hitRecord, Sphere(vec3(0,0,-1), 0.5f, vec3(1.0f)))) {
-        return 0.5f * (hitRecord.normal + 1);
+    vec3 accumulatedColor = vec3(0.0);
+    vec3 throughput = vec3(1.0);
+    for (uint bounce = 0; bounce < c_numBounces; ++bounce) {
+        HitRecord rec;
+        if (TestSceneTrace(ray, rec)) {
+            vec3 targetDirection = randomOnHemisphere(rec.normal, rngState);
+            ray = Ray(rec.p + c_rayPosNormalNudge * rec.normal, targetDirection);
+            throughput *= 0.5; // Adjust this factor as needed
+        } else {
+            vec3 unitDirection = normalize(ray.direction);
+            float t = 0.5 * (unitDirection.y + 1.0);
+            vec3 skyColor = (1.0 - t) * vec3(1.0, 1.0, 1.0) + t * vec3(0.5, 0.7, 1.0);
+            accumulatedColor += throughput * skyColor;
+            break;
+        }
     }
+    return accumulatedColor;
+}
 
-    vec3 unitDirection = normalize(ray.direction);
-    float t = 0.5 * (unitDirection.y + 1.0);
-    return (1.0 - t) * vec3(1.0, 1.0, 1.0) + t * vec3(0.5, 0.7, 1.0);
+Ray getRay(in ivec2 fragCoord, in vec3 viewportUpperLeft, in vec3 pixelDeltaU, in vec3 pixelDeltaV, inout uint rngState) {
+    vec2 offset = vec2(RandomFloat(rngState), RandomFloat(rngState));
+    vec3 pixelSample = viewportUpperLeft
+    + ((fragCoord.x + offset.x) * pixelDeltaU)
+    + ((fragCoord.y + offset.y) * pixelDeltaV);
 
+    vec3 rayOrigin = vec3(0.0f, 0.0f, 0.0f);
+    vec3 rayDirection = normalize(pixelSample - rayOrigin);
 
-    /* initialize
-    vec3 ret = vec3(0.0f, 0.0f, 0.0f);
-    vec3 throughput = vec3(1.0f, 1.0f, 1.0f);
-    vec3 rayPos = startRayPos;
-    vec3 rayDir = startRayDir;
-
-    for (int bounceIndex = 0; bounceIndex <= c_numBounces; ++bounceIndex)
-    {
-        // shoot a ray out into the world
-        SRayHitInfo hitInfo;
-        hitInfo.dist = c_superFar;
-        TestSceneTrace(rayPos, rayDir, hitInfo);
-
-        // if the ray missed, we are done
-        if (hitInfo.dist == c_superFar)
-        break;
-
-        // update the ray position
-        rayPos = (rayPos + rayDir * hitInfo.dist) + hitInfo.normal * c_rayPosNormalNudge;
-
-        // calculate new ray direction, in a cosine weighted hemisphere oriented at normal
-        rayDir = normalize(hitInfo.normal + RandomUnitVector(rngState));
-
-        // add in emissive lighting
-        ret += hitInfo.emissive * throughput;
-
-        // update the colorMultiplier
-        throughput *= hitInfo.albedo;
-    }
-
-    // return pixel color
-    return ret; */
+    return Ray(rayOrigin, rayDirection);
 }
 
 void main() {
@@ -180,13 +199,6 @@ void main() {
 
     // initialize a random number state based on frag coord and frame
     uint rngState = uint(uint(fragCoord.x) * uint(1973) + uint(fragCoord.y) * uint(9277) + uint(frameCounter) * uint(26699)) | uint(1);
-
-    // Calculate normalized coordinates
-    vec2 uv = (vec2(fragCoord) / iResolution) * 2.0f - 1.0f;
-
-    // Ray starts at the camera position (the origin)
-    Ray ray;
-    ray.origin = vec3(0.0f, 0.0f, 0.0f);
 
     // Calculate camera distance
     float cameraDistance = 1.0f / tan(c_FOVDegrees * 0.5f * c_pi / 180.0f);
@@ -202,19 +214,18 @@ void main() {
     vec3 pixelDeltaU = viewportU / float(iResolution.x);
     vec3 pixelDeltaV = viewportV / float(iResolution.y);
 
-    vec3 viewportUpperLeft = ray.origin - vec3(0.0, 0.0, c_focalLength) - viewportU * 0.5 - viewportV * 0.5;
-    vec3 pixel00Loc = viewportUpperLeft + 0.5 * (pixelDeltaU + pixelDeltaV);
-
-    // Calculate the pixel location
-    vec3 pixelCenter = pixel00Loc + fragCoord.x * pixelDeltaU + fragCoord.y * pixelDeltaV;
-    ray.direction = normalize(pixelCenter - ray.origin);
+    vec3 viewportUpperLeft = vec3(0.0, 0.0, 0.0) - vec3(0.0, 0.0, c_focalLength) - viewportU * 0.5 - viewportV * 0.5;
 
     // Accumulated color from previous frames
     vec4 accumulatedColor = imageLoad(imgAccumulation, fragCoord);
     vec4 newColor = vec4(0.0);
 
     // Get color for current ray
-    newColor = vec4(GetColorForRay(ray, rngState), 1.0f);
+    for (uint sampl = 0; sampl < samplesPerPixel; sampl++) {
+        Ray ray = getRay(fragCoord, viewportUpperLeft, pixelDeltaU, pixelDeltaV, rngState);
+        newColor += vec4(GetColorForRay(ray, rngState), 1.0f);
+    }
+    newColor /= float(samplesPerPixel);
 
     // Mix the old accumulated color with the new color
     float alpha = 1.0 / float(frameCounter + 1);

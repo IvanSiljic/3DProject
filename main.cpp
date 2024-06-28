@@ -14,11 +14,11 @@
 unsigned int SCREEN_WIDTH = 1024;
 unsigned int SCREEN_HEIGHT = 1024;
 float c_FOVDegrees = 90.f;
-unsigned c_numBounces = 5;
+unsigned c_numBounces = 3;
 float c_focalLength = 1.f;
 GLuint frameCounter = 0;
-GLuint samplesPerPixel = 10;
-GLuint numOfSpheres = 2;
+GLuint samplesPerPixel = 5;
+GLuint numOfSpheres = 5;
 
 const unsigned short OPENGL_MAJOR_VERSION = 4;
 const unsigned short OPENGL_MINOR_VERSION = 3;
@@ -30,8 +30,11 @@ bool settingsChanged = false;
 struct Sphere {
     glm::vec3 center;
     float radius;
-    glm::vec3 color;
-    float padding;
+    glm::vec3 albedo;
+    float reflectivity;
+    float fuzz;
+    float refractionIndex;
+    float padding[2]; // Padding to ensure alignment
 };
 
 GLfloat vertices[] =
@@ -88,8 +91,11 @@ int main() {
 
     // Create and populate spheres
     std::vector<Sphere> spheresData = {
-            {glm::vec3(0.0f, 0.0f, -1.0f), 0.5f, glm::vec3(1.0f, 1.0f, 1.0f), 0.0f},
-            {glm::vec3(0.0f, -100.5f, -1.0f), 100.0f, glm::vec3(1.0f, 1.0f, 1.0f), 0.0f}
+            {glm::vec3(0.0, -100.5, -1.0), 100.0f, glm::vec3(0.8, 0.8, 0.0), 0.0f, 0.0f, 0.0},
+            {glm::vec3(0.0,    0.0, -1.2), 0.5f, glm::vec3(0.1, 0.2, 0.5), 0.0f, 0.0f, 1.5},
+            {glm::vec3(0.0,    0.0, -1.2), 0.4f, glm::vec3(0.1, 0.2, 0.5), 0.0f, 0.0f, 1.00 / 1.50},
+            {glm::vec3(-1.0,    0.0, -1.0), 0.5f, glm::vec3(0.8, 0.8, 0.8), 1.0f, 0.3f, 0.0},
+            {glm::vec3(1.0,    0.0, -1.0), 0.5f, glm::vec3(0.8, 0.6, 0.2), 1.0f, 1.0f, 0.0}
     };
 
     std::string vertexCode = load_shader_code("assets/shaders/vertex.glsl");
@@ -142,7 +148,7 @@ int main() {
 
         ImGui::SliderFloat("Field of View", &c_FOVDegrees, 1.0f, 180.0f);
         ImGui::SliderFloat("Focal Length", &c_focalLength, 0.1f, 10.0f);
-        ImGui::SliderInt("Number of Bounces", (int*)&c_numBounces, 1, 10);
+        ImGui::SliderInt("Number of Bounces", (int*)&c_numBounces, 1, 30);
         ImGui::SliderInt("Samples per Pixel", (int*)&samplesPerPixel, 1, 20);
 
         if (c_FOVDegrees != prevFOV || c_numBounces != prevNumBounces || prevFocalLength != c_focalLength || prevSamplesPerPixel != samplesPerPixel) {
@@ -158,7 +164,11 @@ int main() {
             Sphere s;
             s.center = glm::vec3(0.0f);
             s.radius = 1.0f; // radius
-            s.color = glm::vec3(1.0f);
+            s.albedo = glm::vec3(1.0f);
+            s.reflectivity = 0;
+            s.fuzz = 0;
+            s.refractionIndex = 0;
+
             spheresData.push_back(s);
 
             numOfSpheres++;
@@ -168,11 +178,12 @@ int main() {
         for (unsigned int i = 0; i < numOfSpheres; ++i) {
             std::string sphereLabel = "Sphere " + std::to_string(i);
             if (ImGui::TreeNode(sphereLabel.c_str())) {
-                ImGui::InputFloat3(("Position##" + std::to_string(i)).c_str(),
-                                    reinterpret_cast<float *>(&spheresData[i].center));
+                ImGui::InputFloat3(("Position##" + std::to_string(i)).c_str(), reinterpret_cast<float *>(&spheresData[i].center));
                 ImGui::InputFloat(("Radius##" + std::to_string(i)).c_str(), &spheresData[i].radius);
-                ImGui::ColorEdit3(("Color##" + std::to_string(i)).c_str(),
-                                  reinterpret_cast<float *>(&spheresData[i].color));
+                ImGui::ColorEdit3(("Albedo##" + std::to_string(i)).c_str(), reinterpret_cast<float *>(&spheresData[i].albedo));
+                ImGui::SliderFloat(("Reflectivity##" + std::to_string(i)).c_str(), &spheresData[i].reflectivity, 0.0f, 1.0f);
+                ImGui::SliderFloat(("Fuzz##" + std::to_string(i)).c_str(), &spheresData[i].fuzz, 0.0f, 1.0f);
+                ImGui::InputFloat(("Refraction Index##" + std::to_string(i)).c_str(), &spheresData[i].refractionIndex);
 
                 if (ImGui::Button(("Remove##" + std::to_string(i)).c_str())) {
                     for (unsigned int j = i; j < numOfSpheres - 1; ++j) {

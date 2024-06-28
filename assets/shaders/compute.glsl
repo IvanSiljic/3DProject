@@ -11,7 +11,7 @@ uniform uint samplesPerPixel;
 uniform uint numOfSpheres;
 
 // The minimum distance a ray must travel before we consider an intersection.
-const float c_minimumRayHitTime = 0.1f;
+const float c_minimumRayHitTime = 0.00001f;
 
 // The farthest we look for ray hits
 const float c_superFar = 10000.0f;
@@ -77,7 +77,10 @@ struct HitRecord {
     vec3 normal;
     float t;
     bool frontFace;
-    vec3 color;
+    vec3 albedo;
+    float reflectivity;
+    float fuzz;
+    float refractionIndex;
 };
 
 void setFaceNormal(in Ray r, in vec3 outwardNormal, inout HitRecord rec) {
@@ -89,7 +92,10 @@ void setFaceNormal(in Ray r, in vec3 outwardNormal, inout HitRecord rec) {
 struct Sphere {
     vec3 center;
     float radius;
-    vec3 color;
+    vec3 albedo;
+    float reflectivity;
+    float fuzz;
+    float refractionIndex;
 };
 
 layout(std430, binding = 0) buffer Spheres {
@@ -117,6 +123,13 @@ float ScalarTriple(vec3 u, vec3 v, vec3 w) {
     return dot(cross(u, v), w);
 }
 
+float reflectance(float cosine, float refraction_index) {
+    // Use Schlick's approximation for reflectance.
+    float r0 = ((1.0 - refraction_index) / (1.0 + refraction_index));
+    r0 = r0 * r0;
+    return r0 + (1.0 - r0) * pow((1.0 - cosine), 5.0);
+}
+
 bool hitSphere(in Ray ray, inout Interval interval, inout HitRecord rec, in Sphere sphere) {
     vec3 oc = sphere.center - ray.origin;
     float a = dot(ray.direction, ray.direction);
@@ -132,7 +145,10 @@ bool hitSphere(in Ray ray, inout Interval interval, inout HitRecord rec, in Sphe
             rec.p = getRayPointAt(ray, rec.t);
             vec3 outwardNormal = (rec.p - sphere.center) / sphere.radius;
             setFaceNormal(ray, outwardNormal, rec);
-            rec.color = sphere.color;
+            rec.albedo = sphere.albedo;
+            rec.reflectivity = sphere.reflectivity;
+            rec.fuzz = sphere.fuzz;
+            rec.refractionIndex = sphere.refractionIndex;
             return true;
         }
         root = (h + sqrtd) / a;
@@ -141,7 +157,10 @@ bool hitSphere(in Ray ray, inout Interval interval, inout HitRecord rec, in Sphe
             rec.p = getRayPointAt(ray, rec.t);
             vec3 outwardNormal = (rec.p - sphere.center) / sphere.radius;
             setFaceNormal(ray, outwardNormal, rec);
-            rec.color = sphere.color;
+            rec.albedo = sphere.albedo;
+            rec.reflectivity = sphere.reflectivity;
+            rec.fuzz = sphere.fuzz;
+            rec.refractionIndex = sphere.refractionIndex;
             return true;
         }
     }
@@ -165,12 +184,39 @@ bool TestSceneTrace(in Ray ray, inout HitRecord hitRecord) {
 vec3 GetColorForRay(in Ray ray, inout uint rngState) {
     vec3 accumulatedColor = vec3(0.0);
     vec3 throughput = vec3(1.0);
+
     for (uint bounce = 0; bounce < c_numBounces; ++bounce) {
         HitRecord rec;
         if (TestSceneTrace(ray, rec)) {
-            vec3 targetDirection = randomOnHemisphere(rec.normal, rngState);
-            ray = Ray(rec.p + c_rayPosNormalNudge * rec.normal, targetDirection);
-            throughput *= 0.5; // Adjust this factor as needed
+            // Random number to decide reflection or refraction
+            float rand = RandomFloat(rngState);
+
+            if (rec.refractionIndex > 0) {
+                float ri = rec.frontFace ? (1.0/rec.refractionIndex) : rec.refractionIndex;
+
+                vec3 unitDirection = normalize(ray.direction);
+                vec3 refracted = refract(unitDirection, rec.normal, ri);
+
+                float cosTheta = min(dot(-unitDirection, rec.normal), 1.0);
+                float sinTheta = sqrt(1.0 - cosTheta*cosTheta);
+
+                if (ri * sinTheta > 1.0 || reflectance(cosTheta, ri) > rand) {
+                    vec3 reflected = reflect(ray.direction, rec.normal) + rec.fuzz * randomUnitVector(rngState);
+                    ray = Ray(rec.p + c_rayPosNormalNudge * rec.normal, reflected);
+                } else {
+                    ray = Ray(rec.p + c_rayPosNormalNudge * refracted, refracted);
+                }
+            } else if (rand < rec.reflectivity) {
+                // Reflect the ray
+                vec3 reflected = reflect(ray.direction, rec.normal) + rec.fuzz * randomUnitVector(rngState);
+                ray = Ray(rec.p + c_rayPosNormalNudge * rec.normal, reflected);
+                throughput *= rec.albedo;
+            } else {
+                // Scatter in a random direction
+                vec3 targetDirection = rec.normal + randomUnitVector(rngState);
+                ray = Ray(rec.p + c_rayPosNormalNudge * rec.normal, targetDirection);
+                throughput *= rec.albedo;
+            }
         } else {
             vec3 unitDirection = normalize(ray.direction);
             float t = 0.5 * (unitDirection.y + 1.0);
@@ -203,9 +249,11 @@ void main() {
     // Calculate camera distance
     float cameraDistance = 1.0f / tan(c_FOVDegrees * 0.5f * c_pi / 180.0f);
 
-    // camera stuff
+    // Determine viewport dimensions
     float aspectRatio = float(iResolution.x) / float(iResolution.y);
-    float viewportHeight = 2.0;
+    float theta = radians(c_FOVDegrees);
+    float h = tan(theta / 2);
+    float viewportHeight = 2.0 * h * c_focalLength;
     float viewportWidth = aspectRatio * viewportHeight;
 
     vec3 viewportU = vec3(viewportWidth, 0.0, 0.0);
@@ -225,7 +273,9 @@ void main() {
         Ray ray = getRay(fragCoord, viewportUpperLeft, pixelDeltaU, pixelDeltaV, rngState);
         newColor += vec4(GetColorForRay(ray, rngState), 1.0f);
     }
-    newColor /= float(samplesPerPixel);
+    newColor.rgb /= float(samplesPerPixel);
+
+    newColor = vec4(sqrt(newColor.r), sqrt(newColor.g), sqrt(newColor.b), 1);
 
     // Mix the old accumulated color with the new color
     float alpha = 1.0 / float(frameCounter + 1);

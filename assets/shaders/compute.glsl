@@ -3,23 +3,20 @@ layout(local_size_x = 8, local_size_y = 4, local_size_z = 1) in;
 layout(rgba32f, binding = 0) uniform image2D screen;
 layout(rgba32f, binding = 1) uniform image2D imgAccumulation;
 uniform ivec2 iResolution;
+uniform vec3 c_lookFrom;
+uniform vec3 c_lookAt;
+uniform vec3 c_lookUp;
 uniform float c_FOVDegrees;
 uniform uint c_numBounces;
-uniform float c_focalLength;
+uniform float c_defocusAngle;
+uniform float c_focusDist;
+uniform uint c_samplesPerPixel;
 uniform uint frameCounter;
-uniform uint samplesPerPixel;
 uniform uint numOfSpheres;
 
-// The minimum distance a ray must travel before we consider an intersection.
 const float c_minimumRayHitTime = 0.00001f;
-
-// The farthest we look for ray hits
 const float c_superFar = 10000.0f;
-
-// Define the value for ray position normal nudge
 const float c_rayPosNormalNudge = 0.001f;
-
-// Pi
 const float c_pi = 3.141592;
 const float c_twopi = 6.283185;
 
@@ -62,12 +59,16 @@ vec3 randomOnHemisphere(vec3 normal, inout uint state) {
     }
 }
 
+vec3 defocusDiskSample(in vec3 defocusDiskU, in vec3 defocusDiskV, in uint rngSeed) {
+    vec3 p = randomInUnitSphere(rngSeed);
+    return vec3(0) + (p.x * defocusDiskU) + (p.y * defocusDiskV);
+}
+
 struct Ray {
     vec3 origin;
     vec3 direction;
 };
 
-// Function to get the point at a distance t along the Ray
 vec3 getRayPointAt(Ray r, float t) {
     return r.origin + t * r.direction;
 }
@@ -84,7 +85,6 @@ struct HitRecord {
 };
 
 void setFaceNormal(in Ray r, in vec3 outwardNormal, inout HitRecord rec) {
-    // Sets the hit record normal vector.
     rec.frontFace = dot(r.direction, outwardNormal) < 0;
     rec.normal = rec.frontFace ? outwardNormal : -outwardNormal;
 }
@@ -124,22 +124,21 @@ float ScalarTriple(vec3 u, vec3 v, vec3 w) {
 }
 
 float reflectance(float cosine, float refraction_index) {
-    // Use Schlick's approximation for reflectance.
     float r0 = ((1.0 - refraction_index) / (1.0 + refraction_index));
     r0 = r0 * r0;
     return r0 + (1.0 - r0) * pow((1.0 - cosine), 5.0);
 }
 
 bool hitSphere(in Ray ray, inout Interval interval, inout HitRecord rec, in Sphere sphere) {
-    vec3 oc = sphere.center - ray.origin;
+    vec3 oc = ray.origin - sphere.center;
     float a = dot(ray.direction, ray.direction);
-    float h = dot(ray.direction, oc);
+    float half_b = dot(oc, ray.direction);
     float c = dot(oc, oc) - sphere.radius * sphere.radius;
-    float discriminant = h * h - a * c;
+    float discriminant = half_b * half_b - a * c;
 
     if (discriminant > 0) {
         float sqrtd = sqrt(discriminant);
-        float root = (h - sqrtd) / a;
+        float root = (-half_b - sqrtd) / a;
         if (intervalSurrounds(interval, root)) {
             rec.t = root;
             rec.p = getRayPointAt(ray, rec.t);
@@ -151,7 +150,7 @@ bool hitSphere(in Ray ray, inout Interval interval, inout HitRecord rec, in Sphe
             rec.refractionIndex = sphere.refractionIndex;
             return true;
         }
-        root = (h + sqrtd) / a;
+        root = (-half_b + sqrtd) / a;
         if (intervalSurrounds(interval, root)) {
             rec.t = root;
             rec.p = getRayPointAt(ray, rec.t);
@@ -188,17 +187,16 @@ vec3 GetColorForRay(in Ray ray, inout uint rngState) {
     for (uint bounce = 0; bounce < c_numBounces; ++bounce) {
         HitRecord rec;
         if (TestSceneTrace(ray, rec)) {
-            // Random number to decide reflection or refraction
             float rand = RandomFloat(rngState);
 
             if (rec.refractionIndex > 0) {
-                float ri = rec.frontFace ? (1.0/rec.refractionIndex) : rec.refractionIndex;
+                float ri = rec.frontFace ? (1.0 / rec.refractionIndex) : rec.refractionIndex;
 
                 vec3 unitDirection = normalize(ray.direction);
                 vec3 refracted = refract(unitDirection, rec.normal, ri);
 
                 float cosTheta = min(dot(-unitDirection, rec.normal), 1.0);
-                float sinTheta = sqrt(1.0 - cosTheta*cosTheta);
+                float sinTheta = sqrt(1.0 - cosTheta * cosTheta);
 
                 if (ri * sinTheta > 1.0 || reflectance(cosTheta, ri) > rand) {
                     vec3 reflected = reflect(ray.direction, rec.normal) + rec.fuzz * randomUnitVector(rngState);
@@ -207,12 +205,10 @@ vec3 GetColorForRay(in Ray ray, inout uint rngState) {
                     ray = Ray(rec.p + c_rayPosNormalNudge * refracted, refracted);
                 }
             } else if (rand < rec.reflectivity) {
-                // Reflect the ray
                 vec3 reflected = reflect(ray.direction, rec.normal) + rec.fuzz * randomUnitVector(rngState);
                 ray = Ray(rec.p + c_rayPosNormalNudge * rec.normal, reflected);
                 throughput *= rec.albedo;
             } else {
-                // Scatter in a random direction
                 vec3 targetDirection = rec.normal + randomUnitVector(rngState);
                 ray = Ray(rec.p + c_rayPosNormalNudge * rec.normal, targetDirection);
                 throughput *= rec.albedo;
@@ -228,13 +224,13 @@ vec3 GetColorForRay(in Ray ray, inout uint rngState) {
     return accumulatedColor;
 }
 
-Ray getRay(in ivec2 fragCoord, in vec3 viewportUpperLeft, in vec3 pixelDeltaU, in vec3 pixelDeltaV, inout uint rngState) {
+Ray getRay(in ivec2 fragCoord, in vec3 viewportUpperLeft, in vec3 pixelDeltaU, in vec3 pixelDeltaV, in vec3 defocusDiskU, in vec3 defocusDiskV, inout uint rngState) {
     vec2 offset = vec2(RandomFloat(rngState), RandomFloat(rngState));
     vec3 pixelSample = viewportUpperLeft
-    + ((fragCoord.x + offset.x) * pixelDeltaU)
-    + ((fragCoord.y + offset.y) * pixelDeltaV);
+    + (float(fragCoord.x) + offset.x) * pixelDeltaU
+    + (float(fragCoord.y) + offset.y) * pixelDeltaV;
 
-    vec3 rayOrigin = vec3(0.0f, 0.0f, 0.0f);
+    vec3 rayOrigin = (c_defocusAngle <= 0) ? c_lookFrom : defocusDiskSample(defocusDiskU, defocusDiskV, rngState) + c_lookFrom;
     vec3 rayDirection = normalize(pixelSample - rayOrigin);
 
     return Ray(rayOrigin, rayDirection);
@@ -243,49 +239,47 @@ Ray getRay(in ivec2 fragCoord, in vec3 viewportUpperLeft, in vec3 pixelDeltaU, i
 void main() {
     ivec2 fragCoord = ivec2(gl_GlobalInvocationID.xy);
 
-    // initialize a random number state based on frag coord and frame
     uint rngState = uint(uint(fragCoord.x) * uint(1973) + uint(fragCoord.y) * uint(9277) + uint(frameCounter) * uint(26699)) | uint(1);
 
-    // Calculate camera distance
-    float cameraDistance = 1.0f / tan(c_FOVDegrees * 0.5f * c_pi / 180.0f);
-
-    // Determine viewport dimensions
     float aspectRatio = float(iResolution.x) / float(iResolution.y);
+
     float theta = radians(c_FOVDegrees);
     float h = tan(theta / 2);
-    float viewportHeight = 2.0 * h * c_focalLength;
+    float viewportHeight = 2.0 * h;
     float viewportWidth = aspectRatio * viewportHeight;
 
-    vec3 viewportU = vec3(viewportWidth, 0.0, 0.0);
-    vec3 viewportV = vec3(0.0, -viewportHeight, 0.0);
+    vec3 w = normalize(c_lookFrom - c_lookAt);
+    vec3 u = normalize(cross(c_lookUp, w));
+    vec3 v = cross(w, u);
 
+    vec3 viewportU = viewportWidth * u;
+    vec3 viewportV = viewportHeight * -v;
+
+    vec3 viewportUpperLeft = c_lookFrom - viewportU / 2.0 - viewportV / 2.0 - w;
     vec3 pixelDeltaU = viewportU / float(iResolution.x);
     vec3 pixelDeltaV = viewportV / float(iResolution.y);
 
-    vec3 viewportUpperLeft = vec3(0.0, 0.0, 0.0) - vec3(0.0, 0.0, c_focalLength) - viewportU * 0.5 - viewportV * 0.5;
+    float defocusRadius = c_defocusAngle <= 0.0 ? 0.0 : c_focusDist * tan(radians(c_defocusAngle / 2.0));
+    vec3 defocusDiskU = u * defocusRadius;
+    vec3 defocusDiskV = v * defocusRadius;
 
-    // Accumulated color from previous frames
     vec4 accumulatedColor = imageLoad(imgAccumulation, fragCoord);
     vec4 newColor = vec4(0.0);
 
-    // Get color for current ray
-    for (uint sampl = 0; sampl < samplesPerPixel; sampl++) {
-        Ray ray = getRay(fragCoord, viewportUpperLeft, pixelDeltaU, pixelDeltaV, rngState);
-        newColor += vec4(GetColorForRay(ray, rngState), 1.0f);
+    for (uint sampl = 0; sampl < c_samplesPerPixel; sampl++) {
+        Ray ray = getRay(fragCoord, viewportUpperLeft, pixelDeltaU, pixelDeltaV, defocusDiskU, defocusDiskV, rngState);
+        newColor += vec4(GetColorForRay(ray, rngState), 1.0);
     }
-    newColor.rgb /= float(samplesPerPixel);
+    newColor.rgb /= float(c_samplesPerPixel);
 
     newColor = vec4(sqrt(newColor.r), sqrt(newColor.g), sqrt(newColor.b), 1);
 
-    // Mix the old accumulated color with the new color
     float alpha = 1.0 / float(frameCounter + 1);
     vec4 color = mix(accumulatedColor, newColor, alpha);
 
-    // Store the color in the accumulation buffer
     imageStore(imgAccumulation, fragCoord, color);
 
-    fragCoord.y = iResolution.y - fragCoord.y;
+    fragCoord.y = iResolution.y - fragCoord.y - 1;
 
-    // Store the color in the image
     imageStore(screen, fragCoord, color);
 }

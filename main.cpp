@@ -13,11 +13,15 @@
 
 unsigned int SCREEN_WIDTH = 1024;
 unsigned int SCREEN_HEIGHT = 1024;
-float c_FOVDegrees = 90.f;
+glm::vec3 c_lookFrom = glm::vec3(13,2,3);
+glm::vec3 c_lookAt = glm::vec3(0, 0, 0);
+glm::vec3 c_lookUp = glm::vec3(0, 1, 0);
+float c_FOVDegrees = 20.f;
 unsigned c_numBounces = 3;
-float c_focalLength = 1.f;
+float c_defocusAngle = 0.6;
+float c_focusDist = 10;
 GLuint frameCounter = 0;
-GLuint samplesPerPixel = 5;
+GLuint c_samplesPerPixel = 5;
 GLuint numOfSpheres = 5;
 
 const unsigned short OPENGL_MAJOR_VERSION = 4;
@@ -92,7 +96,7 @@ int main() {
     // Create and populate spheres
     std::vector<Sphere> spheresData = {
             {glm::vec3(0.0, -100.5, -1.0), 100.0f, glm::vec3(0.8, 0.8, 0.0), 0.0f, 0.0f, 0.0},
-            {glm::vec3(0.0,    0.0, -1.2), 0.5f, glm::vec3(0.1, 0.2, 0.5), 0.0f, 0.0f, 1.5},
+            {glm::vec3(0.0,    0.001, -1.2), 0.5f, glm::vec3(0.1, 0.2, 0.5), 0.0f, 0.0f, 1.5},
             {glm::vec3(0.0,    0.0, -1.2), 0.4f, glm::vec3(0.1, 0.2, 0.5), 0.0f, 0.0f, 1.00 / 1.50},
             {glm::vec3(-1.0,    0.0, -1.0), 0.5f, glm::vec3(0.8, 0.8, 0.8), 1.0f, 0.3f, 0.0},
             {glm::vec3(1.0,    0.0, -1.0), 0.5f, glm::vec3(0.8, 0.6, 0.2), 1.0f, 1.0f, 0.0}
@@ -121,11 +125,15 @@ int main() {
 
     // Set uniform variable locations
     GLint resolutionLocation = glGetUniformLocation(computeProgram, "iResolution");
+    GLint lookFromLocation = glGetUniformLocation(computeProgram, "c_lookFrom");
+    GLint lookAtLocation = glGetUniformLocation(computeProgram, "c_lookAt");
+    GLint lookUpLocation = glGetUniformLocation(computeProgram, "c_lookUp");
     GLint FOVLocation = glGetUniformLocation(computeProgram, "c_FOVDegrees");
     GLint numBouncesLocation = glGetUniformLocation(computeProgram, "c_numBounces");
-    GLint focalLengthLocation = glGetUniformLocation(computeProgram, "c_focalLength");
+    GLint defocusAngleLocation = glGetUniformLocation(computeProgram, "c_defocusAngle");
+    GLint focalDistLocation = glGetUniformLocation(computeProgram, "c_focusDist");
     GLint frameCounterLocation = glGetUniformLocation(computeProgram, "frameCounter");
-    GLint samplesPerPixelLocation = glGetUniformLocation(computeProgram, "samplesPerPixel");
+    GLint samplesPerPixelLocation = glGetUniformLocation(computeProgram, "c_samplesPerPixel");
     GLint numOfSpheresLocation = glGetUniformLocation(computeProgram, "numOfSpheres");
 
     while (!glfwWindowShouldClose(window))
@@ -136,29 +144,43 @@ int main() {
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
 
-        // Create a window using ImGui
-        ImGui::Begin("Settings");
+        // Camera Settings Window
+        ImGui::Begin("Camera Settings");
 
-        // Add ImGui controls here
+        static glm::vec3 prevLookFrom = c_lookFrom;
+        static glm::vec3 prevLookAt = c_lookAt;
+        static glm::vec3 prevLookUp = c_lookUp;
         static float prevFOV = c_FOVDegrees;
-        static float prevFocalLength = c_focalLength;
+        static float prevDefocusAngle = c_defocusAngle;
+        static float prevFocusDist = c_focusDist;
         static unsigned prevNumBounces = c_numBounces;
-        static unsigned prevSamplesPerPixel = samplesPerPixel;
-        static unsigned prevNumOfSpheres = numOfSpheres;
+        static unsigned prevSamplesPerPixel = c_samplesPerPixel;
 
+        ImGui::InputFloat3("Position", reinterpret_cast<float *>(&c_lookFrom));
+        ImGui::InputFloat3("Orientation", reinterpret_cast<float *>(&c_lookAt));
+        ImGui::InputFloat3("Rotation", reinterpret_cast<float *>(&c_lookUp));
         ImGui::SliderFloat("Field of View", &c_FOVDegrees, 1.0f, 180.0f);
-        ImGui::SliderFloat("Focal Length", &c_focalLength, 0.1f, 10.0f);
+        ImGui::SliderFloat("Defocus Angle", &c_defocusAngle, 0.1f, 30.0f);
+        ImGui::SliderFloat("Focus Distance", &c_focusDist, 0.1f, 50.0f);
         ImGui::SliderInt("Number of Bounces", (int*)&c_numBounces, 1, 30);
-        ImGui::SliderInt("Samples per Pixel", (int*)&samplesPerPixel, 1, 20);
+        ImGui::SliderInt("Samples per Pixel", (int*)&c_samplesPerPixel, 1, 20);
 
-        if (c_FOVDegrees != prevFOV || c_numBounces != prevNumBounces || prevFocalLength != c_focalLength || prevSamplesPerPixel != samplesPerPixel) {
+        if (prevLookFrom != c_lookFrom || prevLookAt != c_lookAt || prevLookUp != c_lookUp || c_FOVDegrees != prevFOV || c_numBounces != prevNumBounces || prevDefocusAngle != c_defocusAngle || prevFocusDist != c_focusDist || prevSamplesPerPixel != c_samplesPerPixel) {
             settingsChanged = true;
+            prevLookFrom = c_lookFrom;
+            prevLookAt = c_lookAt;
+            prevLookUp = c_lookUp;
             prevFOV = c_FOVDegrees;
-            prevFocalLength = c_focalLength;
+            prevDefocusAngle = c_defocusAngle;
+            prevFocusDist = c_focusDist;
             prevNumBounces = c_numBounces;
-            prevSamplesPerPixel = samplesPerPixel;
-            prevNumOfSpheres = numOfSpheres;
+            prevSamplesPerPixel = c_samplesPerPixel;
         }
+
+        ImGui::End();
+
+        // Scene Settings Window
+        ImGui::Begin("Scene Settings");
 
         if (ImGui::Button("Add Sphere")) {
             Sphere s;
@@ -221,9 +243,13 @@ int main() {
         }
         glUseProgram(computeProgram);
         glUniform2i(resolutionLocation, SCREEN_WIDTH, SCREEN_HEIGHT);
+        glUniform3f(lookFromLocation, c_lookFrom.x, c_lookFrom.y, c_lookFrom.z);
+        glUniform3f(lookAtLocation, c_lookAt.x, c_lookAt.y, c_lookAt.z);
+        glUniform3f(lookUpLocation, c_lookUp.x, c_lookUp.y, c_lookUp.z);
         glUniform1f(FOVLocation, static_cast<GLfloat>(c_FOVDegrees));
-        glUniform1f(focalLengthLocation, static_cast<GLfloat>(c_focalLength));
-        glUniform1ui(samplesPerPixelLocation, samplesPerPixel);
+        glUniform1f(defocusAngleLocation, static_cast<GLfloat>(c_defocusAngle));
+        glUniform1f(focalDistLocation, static_cast<GLfloat>(c_focusDist));
+        glUniform1ui(samplesPerPixelLocation, c_samplesPerPixel);
         glUniform1ui(numBouncesLocation, c_numBounces);
         glUniform1ui(frameCounterLocation, frameCounter);
         glUniform1ui(numOfSpheresLocation, numOfSpheres);

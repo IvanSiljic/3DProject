@@ -93,6 +93,8 @@ struct HitRecord {
     float reflectivity;
     float fuzz;
     float refractionIndex;
+    vec3 emission;
+    float emissionStrength;
 };
 
 void setFaceNormal(in Ray r, in vec3 outwardNormal, inout HitRecord rec) {
@@ -110,6 +112,8 @@ struct Quad {
     vec3 d;
     vec3 normal;
     vec3 albedo;
+    vec3 emission;
+    float emissionStrength;
 };
 
 layout(std430, binding = 1) buffer Quads {
@@ -123,6 +127,8 @@ struct Sphere {
     float reflectivity;
     float fuzz;
     float refractionIndex;
+    vec3 emission;
+    float emissionStrength;
 };
 
 layout(std430, binding = 0) buffer Spheres {
@@ -209,11 +215,15 @@ bool hitQuad(in Ray ray, inout Interval interval, inout HitRecord rec, in Quad q
     if (hitTriangle(ray, quad.a, quad.b, quad.c, interval, rec, quad.normal, quad.albedo, quad.reflectivity, quad.fuzz, quad.refractionIndex)) {
         hit = true;
         interval.max = rec.t;
+        rec.emission = quad.emission;
+        rec.emissionStrength = quad.emissionStrength;
     }
 
     if (hitTriangle(ray, quad.a, quad.c, quad.d, interval, rec, quad.normal, quad.albedo, quad.reflectivity, quad.fuzz, quad.refractionIndex)) {
         hit = true;
         interval.max = rec.t;
+        rec.emission = quad.emission;
+        rec.emissionStrength = quad.emissionStrength;
     }
 
     return hit;
@@ -239,6 +249,8 @@ bool hitSphere(in Ray ray, inout Interval interval, inout HitRecord rec, in Sphe
             rec.reflectivity = sphere.reflectivity;
             rec.fuzz = sphere.fuzz;
             rec.refractionIndex = sphere.refractionIndex;
+            rec.emission = sphere.emission;
+            rec.emissionStrength = sphere.emissionStrength;
             return true;
         }
         root = (-half_b + sqrtd) / a;
@@ -251,6 +263,8 @@ bool hitSphere(in Ray ray, inout Interval interval, inout HitRecord rec, in Sphe
             rec.reflectivity = sphere.reflectivity;
             rec.fuzz = sphere.fuzz;
             rec.refractionIndex = sphere.refractionIndex;
+            rec.emission = sphere.emission;
+            rec.emissionStrength = sphere.emissionStrength;
             return true;
         }
     }
@@ -279,47 +293,51 @@ bool TestSceneTrace(in Ray ray, inout HitRecord hitRecord) {
 }
 
 vec3 GetColorForRay(in Ray ray, inout uint rngState) {
-    vec3 accumulatedColor = vec3(0.0);
-    vec3 throughput = vec3(1.0);
+    vec3 incomingLight = vec3(0.0);
+    vec3 rayColour = vec3(1.0);
 
     for (uint bounce = 0; bounce < c_numBounces; ++bounce) {
         HitRecord rec;
         if (TestSceneTrace(ray, rec)) {
-            float rand = RandomFloat(rngState);
-
-            if (rec.refractionIndex > 0) {
-                float ri = rec.frontFace ? (1.0 / rec.refractionIndex) : rec.refractionIndex;
-
-                vec3 unitDirection = normalize(ray.direction);
-                vec3 refracted = refract(unitDirection, rec.normal, ri);
-
-                float cosTheta = min(dot(-unitDirection, rec.normal), 1.0);
-                float sinTheta = sqrt(1.0 - cosTheta * cosTheta);
-
-                if (ri * sinTheta > 1.0 || reflectance(cosTheta, ri) > rand) {
-                    vec3 reflected = reflect(ray.direction, rec.normal) + rec.fuzz * randomUnitVector(rngState);
-                    ray = Ray(rec.p + c_rayPosNormalNudge * rec.normal, reflected);
-                } else {
-                    ray = Ray(rec.p + c_rayPosNormalNudge * refracted, refracted);
-                }
-            } else if (rand < rec.reflectivity) {
-                vec3 reflected = reflect(ray.direction, rec.normal) + rec.fuzz * randomUnitVector(rngState);
-                ray = Ray(rec.p + c_rayPosNormalNudge * rec.normal, reflected);
-                throughput *= rec.albedo;
+            // Determine new ray direction (diffuse or specular)
+            vec3 newDirection;
+            bool isSpecularBounce = rec.fuzz > 0.0 && RandomFloat(rngState) < rec.fuzz;
+            if (isSpecularBounce) {
+                newDirection = reflect(ray.direction, rec.normal) + rec.fuzz * randomUnitVector(rngState);
             } else {
-                vec3 targetDirection = rec.normal + randomUnitVector(rngState);
-                ray = Ray(rec.p + c_rayPosNormalNudge * rec.normal, targetDirection);
-                throughput *= rec.albedo;
+                newDirection = rec.normal + randomUnitVector(rngState);
             }
-        } else {
+
+            ray = Ray(rec.p + c_rayPosNormalNudge * rec.normal, newDirection);
+
+            // Accumulate emitted light
+            vec3 emittedLight = rec.emission * rec.emissionStrength;
+            incomingLight += emittedLight * rayColour;
+
+            // Modulate ray colour based on material properties
+            rayColour *= rec.albedo;
+
+            // Russian Roulette termination
+            float probability = max(rayColour.r, max(rayColour.g, rayColour.b));
+            if (RandomFloat(rngState) >= probability) {
+                break;
+            }
+            rayColour /= probability; // Normalize ray colour
+        } else if (c_sky) {
+            // If ray doesn't hit anything and sky is enabled, accumulate sky color
             vec3 unitDirection = normalize(ray.direction);
             float t = 0.5 * (unitDirection.y + 1.0);
             vec3 skyColor = (1.0 - t) * vec3(1.0, 1.0, 1.0) + t * vec3(0.5, 0.7, 1.0);
-            accumulatedColor += throughput * skyColor;
+            incomingLight += skyColor * rayColour;
+            break;
+        } else {
+            // If ray doesn't hit anything and sky is not enabled, terminate
+            incomingLight = vec3(0.0);
             break;
         }
     }
-    return accumulatedColor;
+
+    return incomingLight;
 }
 
 Ray getRay(in ivec2 fragCoord, in vec3 viewportUpperLeft, in vec3 pixelDeltaU, in vec3 pixelDeltaV, in vec3 defocusDiskU, in vec3 defocusDiskV, inout uint rngState) {

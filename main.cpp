@@ -17,7 +17,7 @@ glm::vec3 c_lookFrom = glm::vec3(0,0,0);
 glm::vec3 c_lookAt = glm::vec3(0, 0, -1);
 glm::vec3 c_lookUp = glm::vec3(0, 1, 0);
 float c_FOVDegrees = 60.f;
-unsigned c_numBounces = 10;
+unsigned c_numBounces = 5;
 float c_defocusAngle = 0;
 float c_focusDist = 0.1;
 bool c_sky = true;
@@ -46,6 +46,8 @@ struct Quad {
     float padding1;
     glm::vec3 albedo;
     float padding2;
+    glm::vec3 emission;
+    float emissionStrength;
 };
 
 // Sphere struct definition
@@ -56,7 +58,9 @@ struct Sphere {
     float reflectivity;
     float fuzz;
     float refractionIndex;
-    float padding[2]; // Padding to ensure alignment
+    float padding[2];
+    glm::vec3 emission;
+    float emissionStrength;
 };
 
 GLfloat vertices[] =
@@ -113,59 +117,81 @@ int main() {
 
     // Create and populate spheres
     std::vector<Sphere> spheresData = {
-            {glm::vec3(0.0,-0.499, -3), 0.5f, glm::vec3(1.0, 1.0, 1.0), 0.0f, 0.0f, 0},
+            {glm::vec3(0.0,-0.499, -3), 0.5f, glm::vec3(1.0, 1.0, 1.0), 0.0f, 0.0f, 0, {0, 0}, glm::vec3(1,1,1), 0.0},
     };
 
     // Create and populate quads
     std::vector<Quad> quadsData = {
+            // back side
             {
                 glm::vec3(-1, -1, -4.0), 0,
                 glm::vec3(-1,  1, -4.0), 0,
                 glm::vec3( 1,  1, -4.0), 0,
                 glm::vec3( 1, -1, -4.0), 0,
                 glm::vec3(0.0,    0.0, 1.0), 0,
-                glm::vec3(0.8, 0.8, 0.8), 0
+                glm::vec3(0.8, 0.8, 0.8), 0,
+                glm::vec3(0.0, 0.0, 0.0), 0
             },
+            // left side
             {
                 glm::vec3(-1, -1, -4.0), 0,
                 glm::vec3(-1,  1, -4.0), 0,
                 glm::vec3(-1,  1, -2), 0,
                 glm::vec3(-1, -1, -2), 0,
                 glm::vec3(1.0,    0.0, 0.0), 0,
-                glm::vec3(1.0, 0.0, 0.0), 0
+                glm::vec3(1.0, 0.0, 0.0), 0,
+                glm::vec3(0.0, 0.0, 0.0), 0
             },
+            // right side
             {
-                    glm::vec3(1, 1, -4.0), 0,
-                    glm::vec3(1, -1, -4.0), 0,
-                    glm::vec3(1, -1, -2), 0,
-                    glm::vec3(1, 1, -2), 0,
-                    glm::vec3(-1.0,    0.0, 0.0), 0,
-                    glm::vec3(0.0, 0.0, 1.0), 0
+                glm::vec3(1, 1, -4.0), 0,
+                glm::vec3(1, -1, -4.0), 0,
+                glm::vec3(1, -1, -2), 0,
+                glm::vec3(1, 1, -2), 0,
+                glm::vec3(-1.0,    0.0, 0.0), 0,
+                glm::vec3(0.0, 0.0, 1.0), 0,
+                glm::vec3(0.0, 0.0, 0.0), 0
             },
+            // bottom side
             {
-                    glm::vec3(-1, -1, -4.0), 0,
-                    glm::vec3(1, -1, -4.0), 0,
-                    glm::vec3(1, -1, -2), 0,
-                    glm::vec3(-1, -1, -2), 0,
-                    glm::vec3(0.0,    1.0, 0.0), 0,
-                    glm::vec3(0.0, 1.0, 0.0), 0
+                glm::vec3(-1, -1, -4.0), 0,
+                glm::vec3(1, -1, -4.0), 0,
+                glm::vec3(1, -1, -2), 0,
+                glm::vec3(-1, -1, -2), 0,
+                glm::vec3(0.0,    1.0, 0.0), 0,
+                glm::vec3(0.0, 1.0, 0.0), 0,
+                glm::vec3(0.0, 0.0, 0.0), 0
             },
+            // top side
             {
-                    glm::vec3(-1, 1, -4.0), 0,
-                    glm::vec3(1, 1, -4.0), 0,
-                    glm::vec3(1, 1, -2), 0,
-                    glm::vec3(-1, 1, -2), 0,
-                    glm::vec3(0.0,    -1.0, 0.0), 0,
-                    glm::vec3(1.0, 1.0, 1.0), 0
+                glm::vec3(-1, 1, -4.0), 0,
+                glm::vec3(1, 1, -4.0), 0,
+                glm::vec3(1, 1, -2), 0,
+                glm::vec3(-1, 1, -2), 0,
+                glm::vec3(0.0,    -1.0, 0.0), 0,
+                glm::vec3(1.0, 1.0, 1.0), 0,
+                glm::vec3(0.0, 0.0, 0.0), 0
             },
+            // front side
             {
-                    glm::vec3(-1, -1, -2.0), 0,
-                    glm::vec3(-1,  1, -2.0), 0,
-                    glm::vec3( 1,  1, -2.0), 0,
-                    glm::vec3( 1, -1, -2.0), 0,
-                    glm::vec3(0.0,    0.0, -1.0), 0,
-                    glm::vec3(0.8, 0.8, 0.8), 0
+                glm::vec3(-1, -1, -2.0), 0,
+                glm::vec3(-1,  1, -2.0), 0,
+                glm::vec3( 1,  1, -2.0), 0,
+                glm::vec3( 1, -1, -2.0), 0,
+                glm::vec3(0.0,    0.0, -1.0), 0,
+                glm::vec3(0.8, 0.8, 0.8), 0,
+                glm::vec3(0.0, 0.0, 0.0), 0
             },
+            // light
+            {
+                    glm::vec3(-0.5, 0.9, -4.0), 0,
+                    glm::vec3(1,  0.9, -4.0), 0,
+                    glm::vec3( 1,  0.9, -2.0), 0,
+                    glm::vec3( -1, 0.9, -2.0), 0,
+                    glm::vec3(0.0,    0.0, 1.0), 0,
+                    glm::vec3(0.0, 0.0, 0.0), 0,
+                    glm::vec3(1.0, 1.0, 1.0), 0.7
+            }
     };
 
     numOfSpheres = spheresData.size();
@@ -205,10 +231,11 @@ int main() {
     GLint lookUpLocation = glGetUniformLocation(computeProgram, "c_lookUp");
     GLint FOVLocation = glGetUniformLocation(computeProgram, "c_FOVDegrees");
     GLint numBouncesLocation = glGetUniformLocation(computeProgram, "c_numBounces");
+    GLint samplesPerPixelLocation = glGetUniformLocation(computeProgram, "c_samplesPerPixel");
     GLint defocusAngleLocation = glGetUniformLocation(computeProgram, "c_defocusAngle");
     GLint focalDistLocation = glGetUniformLocation(computeProgram, "c_focusDist");
+    GLint skyLocation = glGetUniformLocation(computeProgram, "c_sky");
     GLint frameCounterLocation = glGetUniformLocation(computeProgram, "frameCounter");
-    GLint samplesPerPixelLocation = glGetUniformLocation(computeProgram, "c_samplesPerPixel");
     GLint numOfSpheresLocation = glGetUniformLocation(computeProgram, "numOfSpheres");
     GLint numOfQuadsLocation = glGetUniformLocation(computeProgram, "numOfQuads");
 
@@ -231,6 +258,7 @@ int main() {
         static float prevFocusDist = c_focusDist;
         static unsigned prevNumBounces = c_numBounces;
         static unsigned prevSamplesPerPixel = c_samplesPerPixel;
+        static bool preSky = c_sky;
 
         ImGui::InputFloat3("Position", reinterpret_cast<float *>(&c_lookFrom));
         ImGui::InputFloat3("Orientation", reinterpret_cast<float *>(&c_lookAt));
@@ -240,8 +268,9 @@ int main() {
         ImGui::SliderFloat("Focus Distance", &c_focusDist, 0.1f, 50.0f);
         ImGui::SliderInt("Number of Bounces", (int*)&c_numBounces, 1, 30);
         ImGui::SliderInt("Samples per Pixel", (int*)&c_samplesPerPixel, 1, 20);
+        ImGui::Checkbox("Sky", &c_sky);
 
-        if (prevLookFrom != c_lookFrom || prevLookAt != c_lookAt || prevLookUp != c_lookUp || c_FOVDegrees != prevFOV || c_numBounces != prevNumBounces || prevDefocusAngle != c_defocusAngle || prevFocusDist != c_focusDist || prevSamplesPerPixel != c_samplesPerPixel) {
+        if (prevLookFrom != c_lookFrom || prevLookAt != c_lookAt || prevLookUp != c_lookUp || c_FOVDegrees != prevFOV || c_numBounces != prevNumBounces || prevDefocusAngle != c_defocusAngle || prevFocusDist != c_focusDist || prevSamplesPerPixel != c_samplesPerPixel || preSky != c_sky) {
             settingsChanged = true;
             prevLookFrom = c_lookFrom;
             prevLookAt = c_lookAt;
@@ -251,6 +280,7 @@ int main() {
             prevFocusDist = c_focusDist;
             prevNumBounces = c_numBounces;
             prevSamplesPerPixel = c_samplesPerPixel;
+            preSky = c_sky;
         }
 
         ImGui::End();
@@ -266,6 +296,7 @@ int main() {
             s.reflectivity = 0;
             s.fuzz = 0;
             s.refractionIndex = 0;
+            s.emission = glm::vec3(0.0f);
 
             spheresData.push_back(s);
 
@@ -284,6 +315,7 @@ int main() {
             q.reflectivity = 0;
             q.fuzz = 0;
             q.refractionIndex = 0;
+            q.emission = glm::vec3(0.0f);
 
             quadsData.push_back(q);
 
@@ -300,6 +332,8 @@ int main() {
                 ImGui::SliderFloat(("Reflectivity##" + std::to_string(i)).c_str(), &spheresData[i].reflectivity, 0.0f, 1.0f);
                 ImGui::SliderFloat(("Fuzz##" + std::to_string(i)).c_str(), &spheresData[i].fuzz, 0.0f, 1.0f);
                 ImGui::InputFloat(("Refraction Index##" + std::to_string(i)).c_str(), &spheresData[i].refractionIndex);
+                ImGui::ColorEdit3(("Emission##" + std::to_string(i)).c_str(), reinterpret_cast<float *>(&spheresData[i].emission)); // New emission input
+                ImGui::InputFloat(("Emission Strength##" + std::to_string(i)).c_str(), &spheresData[i].emissionStrength);
 
                 if (ImGui::Button(("Remove##" + std::to_string(i)).c_str())) {
                     for (unsigned int j = i; j < numOfSpheres - 1; ++j) {
@@ -328,6 +362,8 @@ int main() {
                 ImGui::SliderFloat(("Reflectivity##" + std::to_string(i)).c_str(), &quadsData[i].reflectivity, 0.0f, 1.0f);
                 ImGui::SliderFloat(("Fuzz##" + std::to_string(i)).c_str(), &quadsData[i].fuzz, 0.0f, 1.0f);
                 ImGui::InputFloat(("Refraction Index##" + std::to_string(i)).c_str(), &quadsData[i].refractionIndex);
+                ImGui::ColorEdit3(("Emission Color##" + std::to_string(i)).c_str(), reinterpret_cast<float *>(&quadsData[i].emission)); // New emission input
+                ImGui::InputFloat(("Emission Strength##" + std::to_string(i)).c_str(), &quadsData[i].emissionStrength);
 
                 if (ImGui::Button(("Remove##" + std::to_string(i)).c_str())) {
                     for (unsigned int j = i; j < numOfQuads - 1; ++j) {
@@ -379,6 +415,7 @@ int main() {
         glUniform1ui(frameCounterLocation, frameCounter);
         glUniform1ui(numOfSpheresLocation, numOfSpheres);
         glUniform1ui(numOfQuadsLocation, numOfQuads);
+        glUniform1i(skyLocation, static_cast<int>(c_sky));
 
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, sphereBuffer);
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, quadBuffer);

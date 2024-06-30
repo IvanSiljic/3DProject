@@ -299,16 +299,33 @@ vec3 GetColorForRay(in Ray ray, inout uint rngState) {
     for (uint bounce = 0; bounce < c_numBounces; ++bounce) {
         HitRecord rec;
         if (TestSceneTrace(ray, rec)) {
-            // Determine new ray direction (diffuse or specular)
+            // Determine new ray direction (refraction)
             vec3 newDirection;
-            bool isSpecularBounce = rec.fuzz > 0.0 && RandomFloat(rngState) < rec.fuzz;
-            if (isSpecularBounce) {
-                newDirection = reflect(ray.direction, rec.normal) + rec.fuzz * randomUnitVector(rngState);
-            } else {
-                newDirection = rec.normal + randomUnitVector(rngState);
-            }
+            if (rec.refractionIndex > 0) {
+                float ri = rec.frontFace ? (1.0 / rec.refractionIndex) : rec.refractionIndex;
 
-            ray = Ray(rec.p + c_rayPosNormalNudge * rec.normal, newDirection);
+                vec3 unitDirection = normalize(ray.direction);
+
+                float cosTheta = min(dot(-unitDirection, rec.normal), 1.0);
+                float sinTheta = sqrt(1.0 - cosTheta * cosTheta);
+
+                if (ri * sinTheta > 1.0 || reflectance(cosTheta, ri) > RandomFloat(rngState)) {
+                    newDirection = reflect(ray.direction, rec.normal) + rec.fuzz * randomUnitVector(rngState);
+                    ray = Ray(rec.p + c_rayPosNormalNudge * rec.normal, newDirection);
+                } else {
+                    newDirection = refract(unitDirection, rec.normal, ri);
+                    ray = Ray(rec.p + c_rayPosNormalNudge * newDirection, newDirection);
+                }
+            } else {
+                // Determine new ray direction (diffuse or specular)
+                bool isSpecularBounce = rec.reflectivity > 0.0 && RandomFloat(rngState) < rec.reflectivity;
+                if (isSpecularBounce) {
+                    newDirection = reflect(ray.direction, rec.normal) + rec.fuzz * randomUnitVector(rngState);
+                } else {
+                    newDirection = rec.normal + randomUnitVector(rngState);
+                }
+                ray = Ray(rec.p + c_rayPosNormalNudge * rec.normal, newDirection);
+            }
 
             // Accumulate emitted light
             vec3 emittedLight = rec.emission * rec.emissionStrength;

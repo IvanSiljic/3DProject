@@ -102,6 +102,8 @@ int main() {
             {glm::vec3(1.0,    0.0, -1.0), 0.5f, glm::vec3(0.8, 0.6, 0.2), 1.0f, 1.0f, 0.0}
     };
 
+    numOfSpheres = spheresData.size();
+
     std::string vertexCode = load_shader_code("assets/shaders/vertex.glsl");
     std::string fragmentCode = load_shader_code("assets/shaders/fragment.glsl");
     std::string computeCode = load_shader_code("assets/shaders/compute.glsl");

@@ -59,8 +59,17 @@ vec3 randomOnHemisphere(vec3 normal, inout uint state) {
     }
 }
 
+vec3 randomInUnitDisk(in uint state) {
+    while (true) {
+        vec3 p = vec3(RandomFloat(state) * 2.0 - 1.0, RandomFloat(state) * 2.0 - 1.0, 0.0);
+        if (dot(p, p) < 1.0) {
+            return p;
+        }
+    }
+}
+
 vec3 defocusDiskSample(in vec3 defocusDiskU, in vec3 defocusDiskV, in uint rngSeed) {
-    vec3 p = randomInUnitSphere(rngSeed);
+    vec3 p = randomInUnitDisk(rngSeed);
     return vec3(0) + (p.x * defocusDiskU) + (p.y * defocusDiskV);
 }
 
@@ -245,7 +254,7 @@ void main() {
 
     float theta = radians(c_FOVDegrees);
     float h = tan(theta / 2);
-    float viewportHeight = 2.0 * h;
+    float viewportHeight = 2.0 * h * c_focusDist;
     float viewportWidth = aspectRatio * viewportHeight;
 
     vec3 w = normalize(c_lookFrom - c_lookAt);
@@ -255,9 +264,10 @@ void main() {
     vec3 viewportU = viewportWidth * u;
     vec3 viewportV = viewportHeight * -v;
 
-    vec3 viewportUpperLeft = c_lookFrom - viewportU / 2.0 - viewportV / 2.0 - w;
     vec3 pixelDeltaU = viewportU / float(iResolution.x);
     vec3 pixelDeltaV = viewportV / float(iResolution.y);
+
+    vec3 viewportUpperLeft = c_lookFrom - (c_focusDist * w) - viewportV / 2.0 - viewportU / 2;
 
     float defocusRadius = c_defocusAngle <= 0.0 ? 0.0 : c_focusDist * tan(radians(c_defocusAngle / 2.0));
     vec3 defocusDiskU = u * defocusRadius;

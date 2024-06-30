@@ -160,7 +160,7 @@ int main() {
         ImGui::InputFloat3("Orientation", reinterpret_cast<float *>(&c_lookAt));
         ImGui::InputFloat3("Rotation", reinterpret_cast<float *>(&c_lookUp));
         ImGui::SliderFloat("Field of View", &c_FOVDegrees, 1.0f, 180.0f);
-        ImGui::SliderFloat("Defocus Angle", &c_defocusAngle, 0.1f, 30.0f);
+        ImGui::SliderFloat("Defocus Angle", &c_defocusAngle, 0.0f, 10.0f);
         ImGui::SliderFloat("Focus Distance", &c_focusDist, 0.1f, 50.0f);
         ImGui::SliderInt("Number of Bounces", (int*)&c_numBounces, 1, 30);
         ImGui::SliderInt("Samples per Pixel", (int*)&c_samplesPerPixel, 1, 20);

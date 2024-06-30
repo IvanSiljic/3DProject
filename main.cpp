@@ -115,82 +115,84 @@ int main() {
     setup_vertex_data(VAO, VBO, EBO);
     setup_textures(screenTex, accumulationTex);
 
+    // Box scene to show quad lighting
     // Create and populate spheres
     std::vector<Sphere> spheresData = {
-            {glm::vec3(0.0,-0.499, -3), 0.5f, glm::vec3(1.0, 1.0, 1.0), 0.0f, 0.0f, 0, {0, 0}, glm::vec3(1,1,1), 0.0},
+            {glm::vec3(0.0, -0.499, -3), 0.5f, glm::vec3(1.0, 1.0, 1.0), 0.0f, 0.0f, 0, {0, 0}, glm::vec3(1, 1, 1),
+             0.0},
     };
 
     // Create and populate quads
     std::vector<Quad> quadsData = {
             // back side
             {
-                glm::vec3(-1, -1, -4.0), 0,
-                glm::vec3(-1,  1, -4.0), 0,
-                glm::vec3( 1,  1, -4.0), 0,
-                glm::vec3( 1, -1, -4.0), 0,
-                glm::vec3(0.0,    0.0, 1.0), 0,
+                glm::vec3(-1, -1, -4.0),    0,
+                glm::vec3(-1, 1, -4.0),  0,
+                glm::vec3(1, 1, -4.0),   0,
+                glm::vec3(1, -1, -4.0),   0,
+                glm::vec3(0.0, 0.0, 1.0),  0,
                 glm::vec3(0.8, 0.8, 0.8), 0,
                 glm::vec3(0.0, 0.0, 0.0), 0
             },
             // left side
             {
-                glm::vec3(-1, -1, -4.0), 0,
-                glm::vec3(-1,  1, -4.0), 0,
-                glm::vec3(-1,  1, -2), 0,
-                glm::vec3(-1, -1, -2), 0,
-                glm::vec3(1.0,    0.0, 0.0), 0,
+                glm::vec3(-1, -1, -4.0),    0,
+                glm::vec3(-1, 1, -4.0),  0,
+                glm::vec3(-1, 1, -2),    0,
+                glm::vec3(-1, -1, -2),    0,
+                glm::vec3(1.0, 0.0, 0.0),  0,
                 glm::vec3(1.0, 0.0, 0.0), 0,
                 glm::vec3(0.0, 0.0, 0.0), 0
             },
             // right side
             {
-                glm::vec3(1, 1, -4.0), 0,
-                glm::vec3(1, -1, -4.0), 0,
-                glm::vec3(1, -1, -2), 0,
-                glm::vec3(1, 1, -2), 0,
-                glm::vec3(-1.0,    0.0, 0.0), 0,
+                glm::vec3(1, 1, -4.0),      0,
+                glm::vec3(1, -1, -4.0),  0,
+                glm::vec3(1, -1, -2),    0,
+                glm::vec3(1, 1, -2),      0,
+                glm::vec3(-1.0, 0.0, 0.0), 0,
                 glm::vec3(0.0, 0.0, 1.0), 0,
                 glm::vec3(0.0, 0.0, 0.0), 0
             },
             // bottom side
             {
-                glm::vec3(-1, -1, -4.0), 0,
-                glm::vec3(1, -1, -4.0), 0,
-                glm::vec3(1, -1, -2), 0,
-                glm::vec3(-1, -1, -2), 0,
-                glm::vec3(0.0,    1.0, 0.0), 0,
+                glm::vec3(-1, -1, -4.0),    0,
+                glm::vec3(1, -1, -4.0),  0,
+                glm::vec3(1, -1, -2),    0,
+                glm::vec3(-1, -1, -2),    0,
+                glm::vec3(0.0, 1.0, 0.0),  0,
                 glm::vec3(0.0, 1.0, 0.0), 0,
                 glm::vec3(0.0, 0.0, 0.0), 0
             },
             // top side
             {
-                glm::vec3(-1, 1, -4.0), 0,
-                glm::vec3(1, 1, -4.0), 0,
-                glm::vec3(1, 1, -2), 0,
-                glm::vec3(-1, 1, -2), 0,
-                glm::vec3(0.0,    -1.0, 0.0), 0,
+                glm::vec3(-1, 1, -4.0),     0,
+                glm::vec3(1, 1, -4.0),   0,
+                glm::vec3(1, 1, -2),     0,
+                glm::vec3(-1, 1, -2),     0,
+                glm::vec3(0.0, -1.0, 0.0), 0,
                 glm::vec3(1.0, 1.0, 1.0), 0,
                 glm::vec3(0.0, 0.0, 0.0), 0
             },
             // front side
             {
-                glm::vec3(-1, -1, -2.0), 0,
-                glm::vec3(-1,  1, -2.0), 0,
-                glm::vec3( 1,  1, -2.0), 0,
-                glm::vec3( 1, -1, -2.0), 0,
-                glm::vec3(0.0,    0.0, -1.0), 0,
+                glm::vec3(-1, -1, -2.0),    0,
+                glm::vec3(-1, 1, -2.0),  0,
+                glm::vec3(1, 1, -2.0),   0,
+                glm::vec3(1, -1, -2.0),   0,
+                glm::vec3(0.0, 0.0, -1.0), 0,
                 glm::vec3(0.8, 0.8, 0.8), 0,
                 glm::vec3(0.0, 0.0, 0.0), 0
             },
             // light
             {
-                    glm::vec3(-0.5, 0.9, -4.0), 0,
-                    glm::vec3(1,  0.9, -4.0), 0,
-                    glm::vec3( 1,  0.9, -2.0), 0,
-                    glm::vec3( -1, 0.9, -2.0), 0,
-                    glm::vec3(0.0,    0.0, 1.0), 0,
-                    glm::vec3(0.0, 0.0, 0.0), 0,
-                    glm::vec3(1.0, 1.0, 1.0), 0.7
+                glm::vec3(-0.5, 0.99, -3.5), 0,
+                glm::vec3(0.5, 0.99, -3.5), 0,
+                glm::vec3(0.5, 0.99, -2.5), 0,
+                glm::vec3(-0.5, 0.99, -2.5), 0,
+                glm::vec3(0.0, -1.0, 0.0),  0,
+                glm::vec3(0.0, 0.0, 0.0), 0,
+                glm::vec3(1.0, 1.0, 1.0), 10
             }
     };
 

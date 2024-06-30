@@ -1,6 +1,6 @@
 # Render engine - Project for 3D Grafika
 
-Render engine is a simple desktop application that utilises openGl and imgui to preview and render out 3D scenes and hopefully videos with simple animations.
+Render engine is a simple desktop application that utilises openGl and imgui to preview and render out 3D scenes.
 
 ## Prerequisites
 

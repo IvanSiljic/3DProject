@@ -13,22 +13,40 @@
 
 unsigned int SCREEN_WIDTH = 1024;
 unsigned int SCREEN_HEIGHT = 1024;
-glm::vec3 c_lookFrom = glm::vec3(13,2,3);
-glm::vec3 c_lookAt = glm::vec3(0, 0, 0);
+glm::vec3 c_lookFrom = glm::vec3(0,0,0);
+glm::vec3 c_lookAt = glm::vec3(0, 0, -1);
 glm::vec3 c_lookUp = glm::vec3(0, 1, 0);
-float c_FOVDegrees = 20.f;
-unsigned c_numBounces = 3;
-float c_defocusAngle = 0.6;
-float c_focusDist = 10;
+float c_FOVDegrees = 60.f;
+unsigned c_numBounces = 10;
+float c_defocusAngle = 0;
+float c_focusDist = 0.1;
+bool c_sky = true;
 GLuint frameCounter = 0;
-GLuint c_samplesPerPixel = 5;
-GLuint numOfSpheres = 5;
+GLuint c_samplesPerPixel = 1;
+GLuint numOfSpheres = 1;
+GLuint numOfQuads = 1;
 
 const unsigned short OPENGL_MAJOR_VERSION = 4;
 const unsigned short OPENGL_MINOR_VERSION = 3;
 GLuint screenTex;
 GLuint accumulationTex;
 bool settingsChanged = false;
+
+// Quad struct definition
+struct Quad {
+    glm::vec3 a;
+    float reflectivity;
+    glm::vec3 b;
+    float fuzz;
+    glm::vec3 c;
+    float refractionIndex;
+    glm::vec3 d;
+    float padding;
+    glm::vec3 normal;
+    float padding1;
+    glm::vec3 albedo;
+    float padding2;
+};
 
 // Sphere struct definition
 struct Sphere {
@@ -95,14 +113,63 @@ int main() {
 
     // Create and populate spheres
     std::vector<Sphere> spheresData = {
-            {glm::vec3(0.0, -100.5, -1.0), 100.0f, glm::vec3(0.8, 0.8, 0.0), 0.0f, 0.0f, 0.0},
-            {glm::vec3(0.0,    0.001, -1.2), 0.5f, glm::vec3(0.1, 0.2, 0.5), 0.0f, 0.0f, 1.5},
-            {glm::vec3(0.0,    0.0, -1.2), 0.4f, glm::vec3(0.1, 0.2, 0.5), 0.0f, 0.0f, 1.00 / 1.50},
-            {glm::vec3(-1.0,    0.0, -1.0), 0.5f, glm::vec3(0.8, 0.8, 0.8), 1.0f, 0.3f, 0.0},
-            {glm::vec3(1.0,    0.0, -1.0), 0.5f, glm::vec3(0.8, 0.6, 0.2), 1.0f, 1.0f, 0.0}
+            {glm::vec3(0.0,-0.499, -3), 0.5f, glm::vec3(1.0, 1.0, 1.0), 0.0f, 0.0f, 0},
+    };
+
+    // Create and populate quads
+    std::vector<Quad> quadsData = {
+            {
+                glm::vec3(-1, -1, -4.0), 0,
+                glm::vec3(-1,  1, -4.0), 0,
+                glm::vec3( 1,  1, -4.0), 0,
+                glm::vec3( 1, -1, -4.0), 0,
+                glm::vec3(0.0,    0.0, 1.0), 0,
+                glm::vec3(0.8, 0.8, 0.8), 0
+            },
+            {
+                glm::vec3(-1, -1, -4.0), 0,
+                glm::vec3(-1,  1, -4.0), 0,
+                glm::vec3(-1,  1, -2), 0,
+                glm::vec3(-1, -1, -2), 0,
+                glm::vec3(1.0,    0.0, 0.0), 0,
+                glm::vec3(1.0, 0.0, 0.0), 0
+            },
+            {
+                    glm::vec3(1, 1, -4.0), 0,
+                    glm::vec3(1, -1, -4.0), 0,
+                    glm::vec3(1, -1, -2), 0,
+                    glm::vec3(1, 1, -2), 0,
+                    glm::vec3(-1.0,    0.0, 0.0), 0,
+                    glm::vec3(0.0, 0.0, 1.0), 0
+            },
+            {
+                    glm::vec3(-1, -1, -4.0), 0,
+                    glm::vec3(1, -1, -4.0), 0,
+                    glm::vec3(1, -1, -2), 0,
+                    glm::vec3(-1, -1, -2), 0,
+                    glm::vec3(0.0,    1.0, 0.0), 0,
+                    glm::vec3(0.0, 1.0, 0.0), 0
+            },
+            {
+                    glm::vec3(-1, 1, -4.0), 0,
+                    glm::vec3(1, 1, -4.0), 0,
+                    glm::vec3(1, 1, -2), 0,
+                    glm::vec3(-1, 1, -2), 0,
+                    glm::vec3(0.0,    -1.0, 0.0), 0,
+                    glm::vec3(1.0, 1.0, 1.0), 0
+            },
+            {
+                    glm::vec3(-1, -1, -2.0), 0,
+                    glm::vec3(-1,  1, -2.0), 0,
+                    glm::vec3( 1,  1, -2.0), 0,
+                    glm::vec3( 1, -1, -2.0), 0,
+                    glm::vec3(0.0,    0.0, -1.0), 0,
+                    glm::vec3(0.8, 0.8, 0.8), 0
+            },
     };
 
     numOfSpheres = spheresData.size();
+    numOfQuads = quadsData.size();
 
     std::string vertexCode = load_shader_code("assets/shaders/vertex.glsl");
     std::string fragmentCode = load_shader_code("assets/shaders/fragment.glsl");
@@ -123,6 +190,12 @@ int main() {
     glBufferData(GL_SHADER_STORAGE_BUFFER, spheresData.size() * sizeof(Sphere), spheresData.data(), GL_STATIC_DRAW);
     glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, sphereBuffer); // Bind to binding point 0
 
+    GLuint quadBuffer;
+    glGenBuffers(1, &quadBuffer);
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, quadBuffer);
+    glBufferData(GL_SHADER_STORAGE_BUFFER, quadsData.size() * sizeof(Quad), quadsData.data(), GL_STATIC_DRAW);
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, quadBuffer); // Bind to binding point 0
+
     glLinkProgram(computeProgram);
 
     // Set uniform variable locations
@@ -137,6 +210,7 @@ int main() {
     GLint frameCounterLocation = glGetUniformLocation(computeProgram, "frameCounter");
     GLint samplesPerPixelLocation = glGetUniformLocation(computeProgram, "c_samplesPerPixel");
     GLint numOfSpheresLocation = glGetUniformLocation(computeProgram, "numOfSpheres");
+    GLint numOfQuadsLocation = glGetUniformLocation(computeProgram, "numOfQuads");
 
     while (!glfwWindowShouldClose(window))
     {
@@ -199,6 +273,24 @@ int main() {
             settingsChanged = true;
         }
 
+        if (ImGui::Button("Add Quad")) {
+            Quad q;
+            q.a = glm::vec3(0.0f);
+            q.b = glm::vec3(0.0f);
+            q.c = glm::vec3(0.0f);
+            q.d = glm::vec3(0.0f);
+            q.normal = glm::vec3(0.0f);
+            q.albedo = glm::vec3(1.0f);
+            q.reflectivity = 0;
+            q.fuzz = 0;
+            q.refractionIndex = 0;
+
+            quadsData.push_back(q);
+
+            numOfQuads++;
+            settingsChanged = true;
+        }
+
         for (unsigned int i = 0; i < numOfSpheres; ++i) {
             std::string sphereLabel = "Sphere " + std::to_string(i);
             if (ImGui::TreeNode(sphereLabel.c_str())) {
@@ -224,6 +316,33 @@ int main() {
             }
         }
 
+        for (unsigned int i = 0; i < numOfQuads; ++i) {
+            std::string quadLabel = "Quad " + std::to_string(i);
+            if (ImGui::TreeNode(quadLabel.c_str())) {
+                ImGui::InputFloat3(("A##" + std::to_string(i)).c_str(), reinterpret_cast<float *>(&quadsData[i].a));
+                ImGui::InputFloat3(("B##" + std::to_string(i)).c_str(), reinterpret_cast<float *>(&quadsData[i].b));
+                ImGui::InputFloat3(("C##" + std::to_string(i)).c_str(), reinterpret_cast<float *>(&quadsData[i].c));
+                ImGui::InputFloat3(("D##" + std::to_string(i)).c_str(), reinterpret_cast<float *>(&quadsData[i].d));
+                ImGui::InputFloat3(("Normal##" + std::to_string(i)).c_str(), reinterpret_cast<float *>(&quadsData[i].normal));
+                ImGui::ColorEdit3(("Albedo##" + std::to_string(i)).c_str(), reinterpret_cast<float *>(&quadsData[i].albedo));
+                ImGui::SliderFloat(("Reflectivity##" + std::to_string(i)).c_str(), &quadsData[i].reflectivity, 0.0f, 1.0f);
+                ImGui::SliderFloat(("Fuzz##" + std::to_string(i)).c_str(), &quadsData[i].fuzz, 0.0f, 1.0f);
+                ImGui::InputFloat(("Refraction Index##" + std::to_string(i)).c_str(), &quadsData[i].refractionIndex);
+
+                if (ImGui::Button(("Remove##" + std::to_string(i)).c_str())) {
+                    for (unsigned int j = i; j < numOfQuads - 1; ++j) {
+                        quadsData[j] = quadsData[j + 1];
+                    }
+                    quadsData.pop_back();
+                    numOfQuads--;
+                    settingsChanged = true;
+                }
+                if (ImGui::Button(("Apply"))) {
+                    settingsChanged = true;
+                }
+                ImGui::TreePop();
+            }
+        }
         ImGui::End();
 
         ImGui::Render();
@@ -234,6 +353,10 @@ int main() {
             glBindBuffer(GL_SHADER_STORAGE_BUFFER, sphereBuffer);
             glBufferData(GL_SHADER_STORAGE_BUFFER, spheresData.size() * sizeof(Sphere), spheresData.data(), GL_STATIC_DRAW);
             glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, sphereBuffer); // Bind to binding point 0
+            // Update quad buffer
+            glBindBuffer(GL_SHADER_STORAGE_BUFFER, quadBuffer);
+            glBufferData(GL_SHADER_STORAGE_BUFFER, quadsData.size() * sizeof(Quad), quadsData.data(), GL_STATIC_DRAW);
+            glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, quadBuffer); // Bind to binding point 0
 
             frameCounter = 0;
             settingsChanged = false;
@@ -255,8 +378,10 @@ int main() {
         glUniform1ui(numBouncesLocation, c_numBounces);
         glUniform1ui(frameCounterLocation, frameCounter);
         glUniform1ui(numOfSpheresLocation, numOfSpheres);
+        glUniform1ui(numOfQuadsLocation, numOfQuads);
 
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, sphereBuffer);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, quadBuffer);
         glDispatchCompute((int)(SCREEN_WIDTH / 8), (int)(SCREEN_HEIGHT / 4), 1);
         glMemoryBarrier(GL_ALL_BARRIER_BITS);
 

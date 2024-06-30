@@ -11,8 +11,10 @@ uniform uint c_numBounces;
 uniform float c_defocusAngle;
 uniform float c_focusDist;
 uniform uint c_samplesPerPixel;
+uniform bool c_sky;
 uniform uint frameCounter;
 uniform uint numOfSpheres;
+uniform uint numOfQuads;
 
 const float c_minimumRayHitTime = 0.00001f;
 const float c_superFar = 10000.0f;
@@ -98,6 +100,22 @@ void setFaceNormal(in Ray r, in vec3 outwardNormal, inout HitRecord rec) {
     rec.normal = rec.frontFace ? outwardNormal : -outwardNormal;
 }
 
+struct Quad {
+    vec3 a;
+    float reflectivity;
+    vec3 b;
+    float fuzz;
+    vec3 c;
+    float refractionIndex;
+    vec3 d;
+    vec3 normal;
+    vec3 albedo;
+};
+
+layout(std430, binding = 1) buffer Quads {
+    Quad quads[];
+};
+
 struct Sphere {
     vec3 center;
     float radius;
@@ -137,6 +155,70 @@ float reflectance(float cosine, float refraction_index) {
     r0 = r0 * r0;
     return r0 + (1.0 - r0) * pow((1.0 - cosine), 5.0);
 }
+
+bool hitTriangle(in Ray ray, in vec3 v0, in vec3 v1, in vec3 v2, inout Interval interval, inout HitRecord rec, in vec3 normal, in vec3 albedo, float reflectivity, float fuzz, float refractionIndex) {
+    // Check the angle between the ray direction and the normal
+    if (dot(ray.direction, normal) > 0.0) {
+        return false;
+    }
+
+    vec3 edge1 = v1 - v0;
+    vec3 edge2 = v2 - v0;
+    vec3 h = cross(ray.direction, edge2);
+    float a = dot(edge1, h);
+
+    if (abs(a) < c_minimumRayHitTime) {
+        return false;
+    }
+
+    float f = 1.0 / a;
+    vec3 s = ray.origin - v0;
+    float u = f * dot(s, h);
+
+    if (u < 0.0 || u > 1.0) {
+        return false;
+    }
+
+    vec3 q = cross(s, edge1);
+    float v = f * dot(ray.direction, q);
+
+    if (v < 0.0 || u + v > 1.0) {
+        return false;
+    }
+
+    float t = f * dot(edge2, q);
+
+    if (t > interval.min && t < interval.max) {
+        rec.t = t;
+        rec.p = getRayPointAt(ray, rec.t);
+        rec.normal = normal;
+        rec.albedo = albedo;
+        rec.reflectivity = reflectivity;
+        rec.fuzz = fuzz;
+        rec.refractionIndex = refractionIndex;
+        setFaceNormal(ray, normal, rec);
+        return true;
+    }
+
+    return false;
+}
+
+bool hitQuad(in Ray ray, inout Interval interval, inout HitRecord rec, in Quad quad) {
+    bool hit = false;
+
+    if (hitTriangle(ray, quad.a, quad.b, quad.c, interval, rec, quad.normal, quad.albedo, quad.reflectivity, quad.fuzz, quad.refractionIndex)) {
+        hit = true;
+        interval.max = rec.t;
+    }
+
+    if (hitTriangle(ray, quad.a, quad.c, quad.d, interval, rec, quad.normal, quad.albedo, quad.reflectivity, quad.fuzz, quad.refractionIndex)) {
+        hit = true;
+        interval.max = rec.t;
+    }
+
+    return hit;
+}
+
 
 bool hitSphere(in Ray ray, inout Interval interval, inout HitRecord rec, in Sphere sphere) {
     vec3 oc = ray.origin - sphere.center;
@@ -181,6 +263,13 @@ bool TestSceneTrace(in Ray ray, inout HitRecord hitRecord) {
 
     for (uint i = 0; i < numOfSpheres; ++i) {
         if (hitSphere(ray, interval, hitRecord, spheres[i])) {
+            hitAnything = true;
+            interval.max = hitRecord.t;
+        }
+    }
+
+    for (uint i = 0; i < numOfQuads; ++i) {
+        if (hitQuad(ray, interval, hitRecord, quads[i])) {
             hitAnything = true;
             interval.max = hitRecord.t;
         }

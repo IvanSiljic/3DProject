@@ -2,24 +2,33 @@
 
 Render engine is a simple desktop application that utilises openGl and imgui to preview and render out 3D scenes.
 
+## Preview
+
+Here are some example renders produced by the engine:
+
+![Render 1](images/render1.png)
+![Render 2](images/render2.png)
+![Render 3](images/render3.png)
+![Render 4](images/render4.png)
+
 ## Prerequisites
 
-OpenGL v3.3 
-
-glfw v3.3
+- OpenGL v3.3  
+- GLFW v3.3  
 
 ## References
 
-imgui code - https://github.com/ocornut/imgui
-
-some opengl code - https://learnopengl.com
+- ImGui code — [ocornut/imgui](https://github.com/ocornut/imgui)  
+- Some OpenGL code — [learnopengl.com](https://learnopengl.com)
 
 
 ## Instructions
 
 To clone project:
 
-`git clone https://github.com/IvanSiljic/3DProject.git`
+````
+git clone https://github.com/IvanSiljic/3DProject.git
+````
 
 Open folder in terminal and run next commands:
 
